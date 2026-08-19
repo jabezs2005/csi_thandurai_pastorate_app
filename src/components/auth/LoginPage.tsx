@@ -424,7 +424,7 @@ export default function LoginPage({ onShowSignUp }: LoginPageProps) {
 
 
             <div className="mt-6 pt-6 border-t border-slate-200">
-              <p className="text-xs text-slate-500 text-center mb-3">First time? Set up demo accounts and data</p>
+              <p className="text-xs text-slate-500 text-center mb-3">WELCOME TO THANDURAI PASTORATE</p>
 
               {setupLoading && (
                 <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800 flex gap-2">
@@ -433,18 +433,7 @@ export default function LoginPage({ onShowSignUp }: LoginPageProps) {
                 </div>
               )}
 
-              <button
-                onClick={handleDemoSetup}
-                disabled={setupLoading || churches.length === 0 || churchesLoading}
-                className={`w-full font-medium py-2 rounded-lg text-sm transition-colors flex items-center justify-center gap-2 ${
-                  setupDone
-                    ? 'bg-green-100 hover:bg-green-200 text-green-700'
-                    : 'bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700'
-                }`}
-              >
-                {setupDone && <CheckCircle className="w-4 h-4" />}
-                {setupLoading ? 'Setting up...' : setupDone ? 'Demo Setup Complete!' : 'Setup Demo Data'}
-              </button>
+             
 
               {setupDone && (
                 <div className="mt-3 bg-teal-50 border border-teal-200 rounded-lg p-4 text-xs text-teal-800 space-y-2">

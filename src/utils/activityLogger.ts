@@ -9,16 +9,61 @@ export async function logActivity(
   description?: string,
   changes?: Record<string, any>
 ) {
-  const { error } = await supabase.from('activity_logs').insert({
-    admin_id: adminId,
-    church_id: churchId,
-    action_type: actionType,
-    target_type: targetType,
-    target_id: targetId || null,
-    description: description || `${actionType} ${targetType}`,
-    changes: changes || {},
-  });
-  if (error) {
-    console.error('Failed to log activity:', error.message);
+  try {
+    const {
+      data,
+      error,
+    } = await supabase
+      .from('activity_logs')
+      .insert({
+        admin_id: adminId,
+        church_id: churchId,
+        action_type: actionType,
+        target_type: targetType,
+        target_id:
+          targetId || null,
+        description:
+          description ||
+          `${actionType} ${targetType}`,
+        changes:
+          changes || {},
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error(
+        'Failed to log activity:',
+        error
+      );
+
+      return {
+        success: false,
+        data: null,
+        error,
+      };
+    }
+
+    console.log(
+      'Activity log created successfully:',
+      data
+    );
+
+    return {
+      success: true,
+      data,
+      error: null,
+    };
+  } catch (error) {
+    console.error(
+      'Unexpected activity log error:',
+      error
+    );
+
+    return {
+      success: false,
+      data: null,
+      error,
+    };
   }
 }

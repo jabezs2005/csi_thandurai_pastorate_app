@@ -81,6 +81,7 @@ export default function HarvestFestivalPage() {
     purchased_person_church_id: '',
     purchased_person_contact: '',
     amount: '',
+    payment_method: 'Cash',
   });
 
   const [saving, setSaving] =
@@ -129,6 +130,9 @@ export default function HarvestFestivalPage() {
 
   const [editAmount, setEditAmount] =
     useState('');
+
+  const [editPaymentMethod, setEditPaymentMethod] =
+    useState<'Cash' | 'GPay'>('Cash');
 
 
   // ========================================================
@@ -534,6 +538,7 @@ export default function HarvestFestivalPage() {
           purchased_person_contact:
             form.purchased_person_contact.trim() || null,
           amount,
+          payment_method: form.payment_method,
           status: 'due',
           settled_amount: 0,
         });
@@ -550,6 +555,7 @@ export default function HarvestFestivalPage() {
         purchased_person_church_id: '',
         purchased_person_contact: '',
         amount: '',
+        payment_method: 'Cash',
       });
 
       await fetchItems();
@@ -718,6 +724,12 @@ export default function HarvestFestivalPage() {
       )
     );
 
+    setEditPaymentMethod(
+      item.payment_method === 'GPay'
+        ? 'GPay'
+        : 'Cash'
+    );
+
   }
 
 
@@ -771,6 +783,7 @@ export default function HarvestFestivalPage() {
         purchased_person_contact:
           editPurchasedPersonContact.trim() || null,
         amount,
+        payment_method: editPaymentMethod,
         status,
       })
       .eq('id', item.id);
@@ -806,6 +819,7 @@ export default function HarvestFestivalPage() {
     setEditPurchasedPersonChurchId('');
     setEditPurchasedPersonContact('');
     setEditAmount('');
+    setEditPaymentMethod('Cash');
 
   }
 
@@ -916,6 +930,8 @@ export default function HarvestFestivalPage() {
       purchased_person_contact: '',
 
       amount: '',
+
+      payment_method: 'Cash',
 
     });
 
@@ -1162,6 +1178,11 @@ export default function HarvestFestivalPage() {
       },
 
       {
+        key: 'payment_method',
+        label: 'Payment Method',
+      },
+
+      {
         key: 'status',
         label: 'Status',
       },
@@ -1302,6 +1323,10 @@ export default function HarvestFestivalPage() {
           </td>
 
           <td>
+            ${item.payment_method || 'Cash'}
+          </td>
+
+          <td>
             ${
               item.status === 'paid'
                 ? '<span style="color:green">Paid</span>'
@@ -1354,6 +1379,7 @@ export default function HarvestFestivalPage() {
             <th>Purchased Church</th>
             <th>Contact</th>
             <th>Amount</th>
+            <th>Payment Method</th>
             <th>Status</th>
             <th>Settled</th>
             <th>Pending</th>
@@ -1373,7 +1399,7 @@ export default function HarvestFestivalPage() {
             "
           >
 
-            <td colspan="6">
+            <td colspan="7">
               Total
             </td>
 
@@ -1855,6 +1881,33 @@ export default function HarvestFestivalPage() {
 
           </div>
 
+          {/* PAYMENT METHOD */}
+
+          <div>
+
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+
+              Payment Method
+
+            </label>
+
+            <select
+              value={form.payment_method}
+              onChange={e =>
+                setForm(f => ({
+                  ...f,
+                  payment_method: e.target.value,
+                }))
+              }
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-slate-800 bg-white focus:ring-2 focus:ring-teal-500 focus:border-transparent outline-none"
+              required
+            >
+              <option value="Cash">Cash</option>
+              <option value="GPay">GPay</option>
+            </select>
+
+          </div>
+
         </div>
 
 
@@ -2080,6 +2133,10 @@ export default function HarvestFestivalPage() {
 
                   <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                     Amount
+                  </th>
+
+                  <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Payment Method
                   </th>
 
                   <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -2448,6 +2505,36 @@ export default function HarvestFestivalPage() {
                                 'en-IN'
                               )}
 
+                            </span>
+
+                          )}
+
+                        </td>
+
+
+                        {/* PAYMENT METHOD */}
+
+                        <td className="px-4 py-3 text-center">
+
+                          {isEditingDetails ? (
+
+                            <select
+                              value={editPaymentMethod}
+                              onChange={e =>
+                                setEditPaymentMethod(
+                                  e.target.value as 'Cash' | 'GPay'
+                                )
+                              }
+                              className="w-24 px-2 py-1 border border-teal-400 rounded text-sm text-slate-800 bg-white focus:ring-1 focus:ring-teal-500 outline-none"
+                            >
+                              <option value="Cash">Cash</option>
+                              <option value="GPay">GPay</option>
+                            </select>
+
+                          ) : (
+
+                            <span className="text-sm text-slate-700">
+                              {item.payment_method || 'Cash'}
                             </span>
 
                           )}

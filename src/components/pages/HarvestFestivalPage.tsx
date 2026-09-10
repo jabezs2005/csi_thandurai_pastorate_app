@@ -35,6 +35,42 @@ import {
 } from '../../utils/export';
 
 
+// ============================================================
+// HELPERS
+// ============================================================
+
+/**
+ * Normalizes item names for duplicate detection.
+ *
+ * Examples treated as duplicates:
+ * Rice
+ * RICE
+ * rice
+ * Rice-Bag
+ * rice bag
+ * RICE_BAG
+ * RiceBag
+ *
+ * Spaces, punctuation and capitalization are ignored.
+ */
+function normalizeItemName(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+
+/**
+ * Normalizes item numbers for duplicate detection.
+ * Item numbers are compared case-insensitively and
+ * surrounding whitespace is ignored.
+ */
+function normalizeItemNumber(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+
 export default function HarvestFestivalPage() {
 
   const { profile, church } = useAuth();
@@ -74,7 +110,9 @@ export default function HarvestFestivalPage() {
   // ========================================================
 
   const [form, setForm] = useState({
+    item_number: '',
     item_name: '',
+    actual_price: '',
     consignor: '',
     consignor_church_id: '',
     purchased_person: '',
@@ -82,6 +120,7 @@ export default function HarvestFestivalPage() {
     purchased_person_contact: '',
     amount: '',
     payment_method: 'Cash',
+    remarks: '',
   });
 
   const [saving, setSaving] =
@@ -106,7 +145,13 @@ export default function HarvestFestivalPage() {
   const [editingDetailsId, setEditingDetailsId] =
     useState<string | null>(null);
 
+  const [editItemNumber, setEditItemNumber] =
+    useState('');
+
   const [editItemName, setEditItemName] =
+    useState('');
+
+  const [editActualPrice, setEditActualPrice] =
     useState('');
 
   const [editConsignor, setEditConsignor] =
@@ -132,7 +177,17 @@ export default function HarvestFestivalPage() {
     useState('');
 
   const [editPaymentMethod, setEditPaymentMethod] =
-    useState<'Cash' | 'GPay'>('Cash');
+    useState<
+      'Cash' |
+      'GPay' |
+      'Token' |
+      'Cash,Token' |
+      'GPay,Token' |
+      'GPay,Cash'
+    >('Cash');
+
+  const [editRemarks, setEditRemarks] =
+    useState('');
 
 
   // ========================================================
@@ -155,6 +210,132 @@ export default function HarvestFestivalPage() {
 
   const fetchIdRef =
     useRef(0);
+
+  // Prevent the automatic data-loading effect from firing again
+  // because of unrelated component re-renders. Manual Refresh and
+  // post-save/post-edit/post-delete refreshes still call fetchItems().
+  const lastAutoLoadedKeyRef =
+    useRef('');
+
+
+  // ========================================================
+  // DUPLICATE CHECKS - ADD FORM
+  // ========================================================
+
+  const duplicateItemNumber = useMemo(() => {
+
+    const value =
+      normalizeItemNumber(form.item_number);
+
+    if (!value) {
+      return false;
+    }
+
+    return items.some(
+      (item: any) =>
+        normalizeItemNumber(
+          String(item.item_number || '')
+        ) === value
+    );
+
+  }, [
+    items,
+    form.item_number,
+  ]);
+
+
+  const duplicateItemName = useMemo(() => {
+
+    const value =
+      normalizeItemName(form.item_name);
+
+    if (!value) {
+      return false;
+    }
+
+    return items.some(
+      (item: any) =>
+        normalizeItemName(
+          String(item.item_name || '')
+        ) === value
+    );
+
+  }, [
+    items,
+    form.item_name,
+  ]);
+
+
+  // ========================================================
+  // ITEM NUMBER SERIES
+  // ========================================================
+
+  const availableItemNumbers = useMemo(() => {
+
+    const used = new Set(
+      items
+        .map((item: any) =>
+          normalizeItemNumber(
+            String(item.item_number || '')
+          )
+        )
+        .filter(Boolean)
+    );
+
+    return Array.from(
+      { length: 999 },
+      (_, index) =>
+        String(index + 1).padStart(3, '0')
+    ).filter(
+      number =>
+        !used.has(
+          normalizeItemNumber(number)
+        ) ||
+        normalizeItemNumber(number) ===
+          normalizeItemNumber(form.item_number)
+    );
+
+  }, [
+    items,
+    form.item_number,
+  ]);
+
+
+  const availableEditItemNumbers = useMemo(() => {
+
+    const used = new Set(
+      items
+        .filter((item: any) =>
+          item.id !== editingDetailsId
+        )
+        .map((item: any) =>
+          normalizeItemNumber(
+            String(item.item_number || '')
+          )
+        )
+        .filter(Boolean)
+    );
+
+    const current =
+      normalizeItemNumber(editItemNumber);
+
+    return Array.from(
+      { length: 999 },
+      (_, index) =>
+        String(index + 1).padStart(3, '0')
+    ).filter(
+      number =>
+        !used.has(
+          normalizeItemNumber(number)
+        ) ||
+        normalizeItemNumber(number) === current
+    );
+
+  }, [
+    items,
+    editItemNumber,
+    editingDetailsId,
+  ]);
 
 
   // ========================================================
@@ -180,7 +361,6 @@ export default function HarvestFestivalPage() {
         );
 
         return;
-
       }
 
 
@@ -257,10 +437,12 @@ export default function HarvestFestivalPage() {
 
 
         if (queryError) {
+
           console.error(
             'Harvest Festival fetch error:',
             queryError
           );
+
           throw queryError;
         }
 
@@ -455,16 +637,28 @@ export default function HarvestFestivalPage() {
     if (!initialized)
       return;
 
-
     if (
       isSuperAdmin &&
       !selectedChurchId
     ) {
-
       return;
-
     }
 
+    const loadKey = [
+      profile.id || '',
+      isSuperAdmin ? 'super' : 'church',
+      isSuperAdmin ? selectedChurchId : churchId,
+    ].join('|');
+
+    if (
+      lastAutoLoadedKeyRef.current ===
+      loadKey
+    ) {
+      return;
+    }
+
+    lastAutoLoadedKeyRef.current =
+      loadKey;
 
     fetchItems();
 
@@ -473,106 +667,283 @@ export default function HarvestFestivalPage() {
     initialized,
     isSuperAdmin,
     selectedChurchId,
+    churchId,
     fetchItems,
   ]);
+
+
 
 
   // ========================================================
   // ADD ITEM
   // ========================================================
 
-  async function handleAdd(e: React.FormEvent) {
+  async function handleAdd(
+    e: React.FormEvent
+  ) {
+
     e.preventDefault();
 
     setSaving(true);
     setError('');
 
-    const cId = isSuperAdmin
-      ? selectedChurchId
-      : churchId;
+
+    const cId =
+      isSuperAdmin
+        ? selectedChurchId
+        : churchId;
+
 
     if (!cId) {
-      setError('Please select a church.');
+
+      setError(
+        'Please select a church.'
+      );
+
       setSaving(false);
+
       return;
     }
 
-    const itemName = form.item_name.trim();
-    const purchasedPerson = form.purchased_person.trim();
-    const amount = Number(form.amount);
 
-    if (!itemName) {
-      setError('Please enter the item name.');
+    const itemNumber =
+      form.item_number.trim();
+
+    const itemName =
+      form.item_name.trim();
+
+    const actualPrice =
+      form.actual_price.trim() === ''
+        ? null
+        : Number(form.actual_price);
+
+    const purchasedPerson =
+      form.purchased_person.trim();
+
+    const amount =
+      form.amount.trim() === ''
+        ? null
+        : Number(form.amount);
+
+    const remarks =
+      form.remarks.trim();
+
+
+    // Item Number is the ONLY required field.
+    if (!itemNumber) {
+
+      setError(
+        'Please enter the item number.'
+      );
+
       setSaving(false);
+
       return;
     }
 
-    if (!purchasedPerson) {
-      setError('Please enter the purchased-by person name.');
+
+    // Duplicate Item Number is NOT allowed.
+    if (duplicateItemNumber) {
+
+      setError(
+        `Item number "${itemNumber}" already exists. Please enter a different item number.`
+      );
+
       setSaving(false);
+
       return;
     }
+
+
+    // Optional numeric fields must still be valid
+    // if the user entered something.
+    if (
+      actualPrice !== null &&
+      (Number.isNaN(actualPrice) ||
+        actualPrice < 0)
+    ) {
+
+      setError(
+        'Please enter a valid Actual Price.'
+      );
+
+      setSaving(false);
+
+      return;
+    }
+
 
     if (
-      form.amount.trim() === '' ||
-      Number.isNaN(amount) ||
-      amount < 0
+      amount !== null &&
+      (Number.isNaN(amount) ||
+        amount < 0)
     ) {
-      setError('Please enter a valid amount.');
+
+      setError(
+        'Please enter a valid Purchased Amount.'
+      );
+
+      setSaving(false);
+
+      return;
+    }
+
+
+    // Re-check the database immediately before insert so that
+    // another user cannot select the same number unnoticed.
+    const { data: existingNumberRows, error: duplicateQueryError } =
+      await supabase
+        .from('harvest_festival_items')
+        .select('id,item_number')
+        .eq('church_id', cId)
+        .ilike('item_number', itemNumber)
+        .limit(1);
+
+    if (duplicateQueryError) {
+      console.error(
+        'Harvest Festival duplicate number check error:',
+        duplicateQueryError
+      );
+
+      setError(duplicateQueryError.message);
       setSaving(false);
       return;
     }
 
+    if ((existingNumberRows || []).some(
+      (row: any) =>
+        normalizeItemNumber(
+          String(row.item_number || '')
+        ) === normalizeItemNumber(itemNumber)
+    )) {
+      setError(
+        `Item number "${itemNumber}" has already been selected by another user. Please choose another number.`
+      );
+      await fetchItems();
+      setSaving(false);
+      return;
+    }
+
+
     try {
-      const { error: insertError } = await supabase
-        .from('harvest_festival_items')
-        .insert({
-          church_id: cId,
-          item_name: itemName,
-          consignor: form.consignor.trim() || null,
-          consignor_church_id:
-            form.consignor_church_id || null,
-          purchased_person: purchasedPerson,
-          purchased_person_church_id:
-            form.purchased_person_church_id || null,
-          purchased_person_contact:
-            form.purchased_person_contact.trim() || null,
-          amount,
-          payment_method: form.payment_method,
-          status: 'due',
-          settled_amount: 0,
-        });
+
+      const { error: insertError } =
+        await supabase
+          .from('harvest_festival_items')
+          .insert({
+
+            church_id: cId,
+
+            item_number:
+              itemNumber,
+
+            item_name:
+              itemName || null,
+
+            actual_price:
+              actualPrice,
+
+            consignor:
+              form.consignor.trim() ||
+              null,
+
+            consignor_church_id:
+              form.consignor_church_id ||
+              null,
+
+            purchased_person:
+              purchasedPerson ||
+              null,
+
+            purchased_person_church_id:
+              form.purchased_person_church_id ||
+              null,
+
+            purchased_person_contact:
+              form.purchased_person_contact.trim() ||
+              null,
+
+            amount:
+              amount,
+
+            payment_method:
+              form.payment_method ||
+              null,
+
+            remarks:
+              remarks || null,
+
+            status:
+              amount !== null
+                ? 'due'
+                : null,
+
+            settled_amount:
+              amount !== null
+                ? 0
+                : null,
+
+          });
+
 
       if (insertError) {
+
         throw insertError;
+
       }
 
+
       setForm({
+
+        item_number: '',
+
         item_name: '',
+
+        actual_price: '',
+
         consignor: '',
+
         consignor_church_id: '',
+
         purchased_person: '',
+
         purchased_person_church_id: '',
+
         purchased_person_contact: '',
+
         amount: '',
+
         payment_method: 'Cash',
+        remarks: '',
+
       });
 
+
       await fetchItems();
-    } catch (err: any) {
+
+    } catch (
+      err: any
+    ) {
+
       console.error(
         'Harvest Festival insert error:',
         err
       );
 
+
       setError(
         err?.message ||
         'Failed to add item'
       );
+
     } finally {
+
       setSaving(false);
+
     }
+
   }
+
 
   // ========================================================
   // STATUS CHANGE
@@ -582,12 +953,28 @@ export default function HarvestFestivalPage() {
     id: string,
     status: 'paid' | 'due'
   ) {
-    const item = items.find(i => i.id === id);
+
+    const item =
+      items.find(
+        i => i.id === id
+      );
+
 
     if (!item) {
-      setError('Item not found.');
+
+      setError(
+        'Item not found.'
+      );
+
       return;
     }
+
+
+    const amount =
+      Number(
+        (item as any).amount || 0
+      );
+
 
     const updates: {
       status: 'paid' | 'due';
@@ -596,28 +983,46 @@ export default function HarvestFestivalPage() {
       status,
     };
 
+
     if (status === 'paid') {
+
       updates.settled_amount =
-        Number(item.amount) || 0;
+        amount;
+
     }
 
-    const { error } = await supabase
-      .from('harvest_festival_items')
-      .update(updates)
-      .eq('id', id);
+
+    const { error } =
+      await supabase
+        .from(
+          'harvest_festival_items'
+        )
+        .update(updates)
+        .eq(
+          'id',
+          id
+        );
+
 
     if (error) {
+
       console.error(
         'Harvest Festival status update error:',
         error
       );
 
-      setError(error.message);
+      setError(
+        error.message
+      );
+
       return;
     }
 
+
     await fetchItems();
+
   }
+
 
   // ========================================================
   // DELETE
@@ -680,12 +1085,27 @@ export default function HarvestFestivalPage() {
     );
 
 
-    // Full-details editing and settled-amount editing are separate.
+    // Full-details editing and
+    // settled-amount editing are separate.
     setEditingId(null);
     setEditSettled('');
 
+
+    setEditItemNumber(
+      item.item_number || ''
+    );
+
+
     setEditItemName(
       item.item_name || ''
+    );
+
+
+    setEditActualPrice(
+      item.actual_price === null ||
+      item.actual_price === undefined
+        ? ''
+        : String(item.actual_price)
     );
 
 
@@ -719,88 +1139,282 @@ export default function HarvestFestivalPage() {
 
 
     setEditAmount(
-      String(
-        item.amount ?? ''
-      )
+      item.amount === null ||
+      item.amount === undefined
+        ? ''
+        : String(item.amount)
     );
+
 
     setEditPaymentMethod(
       item.payment_method === 'GPay'
         ? 'GPay'
-        : 'Cash'
+        : item.payment_method === 'Token'
+          ? 'Token'
+          : item.payment_method === 'Cash,Token'
+            ? 'Cash,Token'
+            : item.payment_method === 'GPay,Token'
+              ? 'GPay,Token'
+              : item.payment_method === 'GPay,Cash'
+                ? 'GPay,Cash'
+                : 'Cash'
     );
 
+    setEditRemarks(item.remarks || '');
+
+    setError('');
+
   }
+
+
+  // ========================================================
+  // EDIT DUPLICATE CHECKS
+  // ========================================================
+
+  const hasDuplicateEditItemNumber = useMemo(() => {
+
+    const value =
+      normalizeItemNumber(
+        editItemNumber
+      );
+
+
+    if (!value) {
+      return false;
+    }
+
+
+    return items.some(
+      (item: any) =>
+        item.id !== editingDetailsId &&
+        normalizeItemNumber(
+          String(item.item_number || '')
+        ) === value
+    );
+
+  }, [
+    items,
+    editItemNumber,
+    editingDetailsId,
+  ]);
+
+
+  const hasDuplicateEditItemName = useMemo(() => {
+
+    const value =
+      normalizeItemName(
+        editItemName
+      );
+
+
+    if (!value) {
+      return false;
+    }
+
+
+    return items.some(
+      (item: any) =>
+        item.id !== editingDetailsId &&
+        normalizeItemName(
+          String(item.item_name || '')
+        ) === value
+    );
+
+  }, [
+    items,
+    editItemName,
+    editingDetailsId,
+  ]);
 
 
   // ========================================================
   // SAVE FULL EDIT
   // ========================================================
 
-  async function saveEditDetails(item: any) {
-    const itemName = editItemName.trim();
-    const purchasedPerson = editPurchasedPerson.trim();
-    const amount = Number(editAmount);
+  async function saveEditDetails(
+    item: any
+  ) {
 
-    if (!itemName) {
-      setError('Item name cannot be empty.');
+    const itemNumber =
+      editItemNumber.trim();
+
+    const itemName =
+      editItemName.trim();
+
+    const actualPrice =
+      editActualPrice.trim() === ''
+        ? null
+        : Number(editActualPrice);
+
+    const purchasedPerson =
+      editPurchasedPerson.trim();
+
+    const amount =
+      editAmount.trim() === ''
+        ? null
+        : Number(editAmount);
+
+    const remarks =
+      editRemarks.trim();
+
+
+    // Item Number remains the ONLY required field.
+    if (!itemNumber) {
+
+      setError(
+        'Item number cannot be empty.'
+      );
+
       return;
     }
 
-    if (!purchasedPerson) {
-      setError('Purchased-by person cannot be empty.');
+
+    // Duplicate Item Number is not allowed.
+    if (hasDuplicateEditItemNumber) {
+
+      setError(
+        `Item number "${itemNumber}" already exists. Please enter a different item number.`
+      );
+
       return;
     }
+
 
     if (
-      editAmount.trim() === '' ||
-      Number.isNaN(amount) ||
-      amount < 0
+      actualPrice !== null &&
+      (Number.isNaN(actualPrice) ||
+        actualPrice < 0)
     ) {
-      setError('Please enter a valid amount.');
+
+      setError(
+        'Please enter a valid Actual Price.'
+      );
+
       return;
     }
 
+
+    if (
+      amount !== null &&
+      (Number.isNaN(amount) ||
+        amount < 0)
+    ) {
+
+      setError(
+        'Please enter a valid Purchased Amount.'
+      );
+
+      return;
+    }
+
+
     const settled =
-      Number(item.settled_amount) || 0;
+      Number(
+        item.settled_amount || 0
+      );
+
+
+    const numericAmount =
+      amount === null
+        ? 0
+        : amount;
+
+
+    const safeSettled =
+      Math.min(
+        settled,
+        numericAmount
+      );
+
 
     const status =
-      settled >= amount
+      amount !== null &&
+      safeSettled >= numericAmount
         ? 'paid'
         : 'due';
 
-    const { error } = await supabase
-      .from('harvest_festival_items')
-      .update({
-        item_name: itemName,
-        consignor:
-          editConsignor.trim() || null,
-        consignor_church_id:
-          editConsignorChurchId || null,
-        purchased_person: purchasedPerson,
-        purchased_person_church_id:
-          editPurchasedPersonChurchId || null,
-        purchased_person_contact:
-          editPurchasedPersonContact.trim() || null,
-        amount,
-        payment_method: editPaymentMethod,
-        status,
-      })
-      .eq('id', item.id);
+
+    const { error } =
+      await supabase
+        .from(
+          'harvest_festival_items'
+        )
+        .update({
+
+          item_number:
+            itemNumber,
+
+          item_name:
+            itemName || null,
+
+          actual_price:
+            actualPrice,
+
+          consignor:
+            editConsignor.trim() ||
+            null,
+
+          consignor_church_id:
+            editConsignorChurchId ||
+            null,
+
+          purchased_person:
+            purchasedPerson ||
+            null,
+
+          purchased_person_church_id:
+            editPurchasedPersonChurchId ||
+            null,
+
+          purchased_person_contact:
+            editPurchasedPersonContact.trim() ||
+            null,
+
+          amount:
+            amount,
+
+          payment_method:
+            editPaymentMethod ||
+            null,
+
+          remarks:
+            remarks || null,
+
+          status,
+
+          settled_amount:
+            amount === null
+              ? null
+              : safeSettled,
+
+        })
+        .eq(
+          'id',
+          item.id
+        );
+
 
     if (error) {
+
       console.error(
         'Harvest Festival update error:',
         error
       );
 
-      setError(error.message);
+      setError(
+        error.message
+      );
+
       return;
     }
 
+
     cancelEditDetails();
+
     await fetchItems();
+
   }
+
 
   // ========================================================
   // CANCEL FULL EDIT
@@ -812,14 +1426,28 @@ export default function HarvestFestivalPage() {
       null
     );
 
+    setEditItemNumber('');
+
     setEditItemName('');
+
+    setEditActualPrice('');
+
     setEditConsignor('');
+
     setEditConsignorChurchId('');
+
     setEditPurchasedPerson('');
+
     setEditPurchasedPersonChurchId('');
+
     setEditPurchasedPersonContact('');
+
     setEditAmount('');
+
     setEditPaymentMethod('Cash');
+    setEditRemarks('');
+
+    setError('');
 
   }
 
@@ -840,7 +1468,7 @@ export default function HarvestFestivalPage() {
 
     setEditSettled(
       String(
-        item.settled_amount ?? 0
+        (item as any).settled_amount ?? 0
       )
     );
 
@@ -852,46 +1480,95 @@ export default function HarvestFestivalPage() {
   async function saveEditSettled(
     item: HarvestFestivalItem
   ) {
-    const rawSettled = editSettled.trim();
+
+    const rawSettled =
+      editSettled.trim();
+
 
     if (rawSettled === '') {
-      setError('Please enter a settled amount.');
+
+      setError(
+        'Please enter a settled amount.'
+      );
+
       return;
     }
 
-    const settled = Number(rawSettled);
-    const amount = Number(item.amount) || 0;
 
-    if (Number.isNaN(settled) || settled < 0) {
-      setError('Settled amount cannot be negative.');
+    const settled =
+      Number(rawSettled);
+
+
+    const rawAmount =
+      (item as any).amount;
+
+
+    const amount =
+      rawAmount === null ||
+      rawAmount === undefined ||
+      rawAmount === ''
+        ? 0
+        : Number(rawAmount);
+
+
+    if (
+      Number.isNaN(settled) ||
+      settled < 0
+    ) {
+
+      setError(
+        'Settled amount cannot be negative.'
+      );
+
       return;
     }
 
-    if (settled > amount) {
+
+    if (
+      settled > amount
+    ) {
+
       setError(
         'Settled amount cannot be greater than the total amount.'
       );
+
       return;
     }
 
+
     const status =
-      settled >= amount
+      settled >= amount &&
+      amount > 0
         ? 'paid'
         : 'due';
 
-    const { error } = await supabase
-      .from('harvest_festival_items')
-      .update({
-        settled_amount: settled,
-        status,
-      })
-      .eq('id', item.id);
+
+    const { error } =
+      await supabase
+        .from(
+          'harvest_festival_items'
+        )
+        .update({
+
+          settled_amount:
+            settled,
+
+          status,
+
+        })
+        .eq(
+          'id',
+          item.id
+        );
+
 
     if (error) {
+
       console.error(
         'Harvest Festival settled amount update error:',
         error
       );
+
 
       setError(
         error.message ||
@@ -901,13 +1578,18 @@ export default function HarvestFestivalPage() {
       return;
     }
 
+
     // Close ONLY the settled amount editor.
     setEditingId(null);
+
     setEditSettled('');
+
     setError('');
 
     await fetchItems();
+
   }
+
 
   // ========================================================
   // CLEAR
@@ -917,7 +1599,11 @@ export default function HarvestFestivalPage() {
 
     setForm({
 
+      item_number: '',
+
       item_name: '',
+
+      actual_price: '',
 
       consignor: '',
 
@@ -932,8 +1618,11 @@ export default function HarvestFestivalPage() {
       amount: '',
 
       payment_method: 'Cash',
+      remarks: '',
 
     });
+
+    setError('');
 
   }
 
@@ -1014,13 +1703,22 @@ export default function HarvestFestivalPage() {
         (item: any) => {
 
           const pending =
-            Number(item.amount) -
+            Number(item.amount || 0) -
             Number(
-              item.settled_amount
+              item.settled_amount || 0
             );
 
 
           return (
+
+            String(
+              item.item_number ||
+              ''
+            )
+              .toLowerCase()
+              .includes(q)
+
+            ||
 
             (
               item.item_name ||
@@ -1079,13 +1777,19 @@ export default function HarvestFestivalPage() {
             ||
 
             String(
-              item.amount
+              item.actual_price ?? ''
             ).includes(q)
 
             ||
 
             String(
-              item.settled_amount
+              item.amount ?? ''
+            ).includes(q)
+
+            ||
+
+            String(
+              item.settled_amount ?? ''
             ).includes(q)
 
             ||
@@ -1093,6 +1797,18 @@ export default function HarvestFestivalPage() {
             String(
               pending
             ).includes(q)
+
+            ||
+
+            (item.payment_method || '')
+              .toLowerCase()
+              .includes(q)
+
+            ||
+
+            (item.remarks || '')
+              .toLowerCase()
+              .includes(q)
 
           );
 
@@ -1105,25 +1821,94 @@ export default function HarvestFestivalPage() {
     ]);
 
 
+  const sortedFilteredItems =
+    useMemo(() => {
+
+      return [...filteredItems].sort(
+        (a: any, b: any) => {
+
+          const aNumber =
+            Number.parseInt(
+              String(a.item_number || '')
+                .replace(/\D/g, ''),
+              10
+            );
+
+          const bNumber =
+            Number.parseInt(
+              String(b.item_number || '')
+                .replace(/\D/g, ''),
+              10
+            );
+
+          const aHasNumber =
+            Number.isFinite(aNumber);
+
+          const bHasNumber =
+            Number.isFinite(bNumber);
+
+          if (aHasNumber && bHasNumber) {
+            if (aNumber !== bNumber) {
+              return aNumber - bNumber;
+            }
+
+            return String(
+              a.item_number || ''
+            ).localeCompare(
+              String(b.item_number || ''),
+              undefined,
+              { numeric: true }
+            );
+          }
+
+          if (aHasNumber) return -1;
+          if (bHasNumber) return 1;
+
+          return String(
+            a.item_number || ''
+          ).localeCompare(
+            String(b.item_number || ''),
+            undefined,
+            { numeric: true }
+          );
+        }
+      );
+
+    }, [filteredItems]);
+
+
   // ========================================================
   // TOTALS
   // ========================================================
 
+  const totalActualPrice =
+    filteredItems.reduce(
+      (sum, item: any) =>
+        sum +
+        Number(
+          item.actual_price || 0
+        ),
+      0
+    );
+
+
   const totalAmount =
     filteredItems.reduce(
-      (sum, item) =>
+      (sum, item: any) =>
         sum +
-        Number(item.amount),
+        Number(
+          item.amount || 0
+        ),
       0
     );
 
 
   const totalSettled =
     filteredItems.reduce(
-      (sum, item) =>
+      (sum, item: any) =>
         sum +
         Number(
-          item.settled_amount
+          item.settled_amount || 0
         ),
       0
     );
@@ -1143,8 +1928,18 @@ export default function HarvestFestivalPage() {
     const columns = [
 
       {
+        key: 'item_number',
+        label: 'Item Number',
+      },
+
+      {
         key: 'item_name',
         label: 'Item Name',
+      },
+
+      {
+        key: 'actual_price',
+        label: 'Actual Price',
       },
 
       {
@@ -1174,7 +1969,7 @@ export default function HarvestFestivalPage() {
 
       {
         key: 'amount',
-        label: 'Amount',
+        label: 'Purchased Amount',
       },
 
       {
@@ -1197,14 +1992,23 @@ export default function HarvestFestivalPage() {
         label: 'Pending Amount',
       },
 
+      {
+        key: 'remarks',
+        label: 'Remarks',
+      },
+
     ];
 
 
     const data =
-      filteredItems.map(
+      sortedFilteredItems.map(
         (item: any) => ({
 
           ...item,
+
+          actual_price:
+            item.actual_price ??
+            '',
 
           consignor_church_name:
             item
@@ -1217,10 +2021,13 @@ export default function HarvestFestivalPage() {
               ?.name || '',
 
           pending_amount:
-            Number(item.amount) -
+            Number(item.amount || 0) -
             Number(
-              item.settled_amount
+              item.settled_amount || 0
             ),
+
+          remarks:
+            item.remarks ?? '',
 
         })
       );
@@ -1234,18 +2041,33 @@ export default function HarvestFestivalPage() {
                   c =>
                     c.id ===
                     selectedChurchId
-                )?.name || 'church'
+                )?.name ||
+                'church'
               : 'all-churches'
           )
         : church?.name ||
           'church';
 
 
+    const csvData = [
+      ...data,
+      {
+        item_number: 'GRAND TOTAL',
+        item_name: '',
+        actual_price: totalActualPrice,
+        amount: totalAmount,
+        settled_amount: totalSettled,
+        pending_amount: totalPending,
+        remarks: '',
+      },
+    ];
+
+
     exportToCSV(
       `harvest-festival-${churchName}-${new Date()
         .toISOString()
         .split('T')[0]}`,
-      data,
+      csvData,
       columns
     );
 
@@ -1271,13 +2093,31 @@ export default function HarvestFestivalPage() {
 
 
     const rows =
-      filteredItems.map(
+      sortedFilteredItems.map(
         (item: any) => `
 
         <tr>
 
           <td>
+            ${item.item_number || ''}
+          </td>
+
+          <td>
             ${item.item_name || ''}
+          </td>
+
+          <td>
+            ${
+              item.actual_price !== null &&
+              item.actual_price !== undefined &&
+              item.actual_price !== ''
+                ? `₹${Number(
+                    item.actual_price
+                  ).toLocaleString(
+                    'en-IN'
+                  )}`
+                : ''
+            }
           </td>
 
           <td>
@@ -1315,42 +2155,68 @@ export default function HarvestFestivalPage() {
           </td>
 
           <td>
-            ₹${Number(
-              item.amount
-            ).toLocaleString(
-              'en-IN'
-            )}
+            ${
+              item.amount !== null &&
+              item.amount !== undefined &&
+              item.amount !== ''
+                ? `₹${Number(
+                    item.amount
+                  ).toLocaleString(
+                    'en-IN'
+                  )}`
+                : ''
+            }
           </td>
 
           <td>
-            ${item.payment_method || 'Cash'}
+            ${item.payment_method || ''}
           </td>
 
           <td>
             ${
               item.status === 'paid'
                 ? '<span style="color:green">Paid</span>'
-                : '<span style="color:red">Due</span>'
+                : item.amount !== null &&
+                  item.amount !== undefined &&
+                  item.amount !== ''
+                  ? '<span style="color:red">Due</span>'
+                  : ''
             }
           </td>
 
           <td>
-            ₹${Number(
-              item.settled_amount
-            ).toLocaleString(
-              'en-IN'
-            )}
+            ${
+              item.settled_amount !== null &&
+              item.settled_amount !== undefined &&
+              item.settled_amount !== ''
+                ? `₹${Number(
+                    item.settled_amount
+                  ).toLocaleString(
+                    'en-IN'
+                  )}`
+                : ''
+            }
           </td>
 
           <td>
-            ₹${(
-              Number(item.amount) -
-              Number(
-                item.settled_amount
-              )
-            ).toLocaleString(
-              'en-IN'
-            )}
+            ${
+              item.amount !== null &&
+              item.amount !== undefined &&
+              item.amount !== ''
+                ? `₹${(
+                    Number(item.amount || 0) -
+                    Number(
+                      item.settled_amount || 0
+                    )
+                  ).toLocaleString(
+                    'en-IN'
+                  )}`
+                : ''
+            }
+          </td>
+
+          <td>
+            ${item.remarks || ''}
           </td>
 
         </tr>
@@ -1372,17 +2238,20 @@ export default function HarvestFestivalPage() {
 
           <tr>
 
-            <th>Item</th>
+            <th>Item Number</th>
+            <th>Item Name</th>
+            <th>Actual Price</th>
             <th>Consignor</th>
             <th>Consignor Church</th>
             <th>Purchased By</th>
             <th>Purchased Church</th>
             <th>Contact</th>
-            <th>Amount</th>
+            <th>Purchased Amount</th>
             <th>Payment Method</th>
             <th>Status</th>
             <th>Settled</th>
             <th>Pending</th>
+            <th>Remarks</th>
 
           </tr>
 
@@ -1399,15 +2268,25 @@ export default function HarvestFestivalPage() {
             "
           >
 
-            <td colspan="7">
-              Total
+            <td colspan="2">
+              Grand Total
             </td>
+
+            <td>
+              ₹${totalActualPrice.toLocaleString(
+                'en-IN'
+              )}
+            </td>
+
+            <td colspan="5"></td>
 
             <td>
               ₹${totalAmount.toLocaleString(
                 'en-IN'
               )}
             </td>
+
+            <td></td>
 
             <td></td>
 
@@ -1422,6 +2301,8 @@ export default function HarvestFestivalPage() {
                 'en-IN'
               )}
             </td>
+
+            <td></td>
 
           </tr>
 
@@ -1626,14 +2507,84 @@ export default function HarvestFestivalPage() {
 
         </h2>
 
+
         {isSuperAdmin && !selectedChurchId && (
+
           <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+
             Select a specific church above before adding a harvest festival item.
+
           </div>
+
         )}
 
 
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+
+
+          {/* ITEM NUMBER */}
+
+          <div>
+
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+
+              Item Number{' '}
+
+              <span className="text-red-500">
+                *
+              </span>
+
+            </label>
+
+
+            <select
+              value={form.item_number}
+              onChange={e =>
+                setForm(f => ({
+                  ...f,
+                  item_number: e.target.value,
+                }))
+              }
+              className={`w-full px-3 py-2.5 border rounded-lg text-slate-800 bg-white focus:ring-2 focus:ring-teal-500 focus:border-transparent outline-none ${
+                duplicateItemNumber
+                  ? 'border-red-400 bg-red-50'
+                  : 'border-slate-300'
+              }`}
+              required
+            >
+
+              <option value="">
+                Select Item Number
+              </option>
+
+              {availableItemNumbers.map(
+                number => (
+                  <option
+                    key={number}
+                    value={number}
+                  >
+                    {number}
+                  </option>
+                )
+              )}
+
+            </select>
+
+            <p className="text-[11px] text-slate-400 mt-1">
+              Numbers already used by this church are hidden.
+            </p>
+
+            {duplicateItemNumber && (
+
+              <p className="text-xs text-red-600 mt-1 font-medium">
+
+                Item number already exists.
+
+              </p>
+
+            )}
+
+          </div>
 
 
           {/* ITEM NAME */}
@@ -1642,9 +2593,14 @@ export default function HarvestFestivalPage() {
 
             <label className="block text-sm font-medium text-slate-700 mb-1">
 
-              Item Name
+              Item Name{' '}
+
+              <span className="text-xs text-slate-400 font-normal">
+                (Optional)
+              </span>
 
             </label>
+
 
             <input
               type="text"
@@ -1657,8 +2613,68 @@ export default function HarvestFestivalPage() {
                 }))
               }
               placeholder="e.g. Rice, Vegetables"
-              className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-slate-800 focus:ring-2 focus:ring-teal-500 focus:border-transparent outline-none"
+              className={`w-full px-3 py-2.5 border rounded-lg text-slate-800 focus:ring-2 focus:ring-teal-500 focus:border-transparent outline-none ${
+                duplicateItemName
+                  ? 'border-amber-400 bg-amber-50'
+                  : 'border-slate-300'
+              }`}
             />
+
+
+            {duplicateItemName && (
+
+              <p className="text-xs text-amber-600 mt-1 font-medium">
+
+                Duplicate item name already exists.
+
+              </p>
+
+            )}
+
+          </div>
+
+
+          {/* ACTUAL PRICE */}
+
+          <div>
+
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+
+              Actual Price{' '}
+
+              <span className="text-xs text-slate-400 font-normal">
+                (Optional)
+              </span>
+
+            </label>
+
+
+            <div className="relative">
+
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">
+
+                ₹
+
+              </span>
+
+
+              <input
+                type="number"
+                value={form.actual_price}
+                onChange={e =>
+                  setForm(f => ({
+                    ...f,
+                    actual_price:
+                      e.target.value,
+                  }))
+                }
+                placeholder="0"
+                min="0"
+                step="0.01"
+                className="w-full pl-7 pr-3 py-2.5 border border-slate-300 rounded-lg text-slate-800 focus:ring-2 focus:ring-teal-500 focus:border-transparent outline-none"
+              />
+
+            </div>
 
           </div>
 
@@ -1669,9 +2685,14 @@ export default function HarvestFestivalPage() {
 
             <label className="block text-sm font-medium text-slate-700 mb-1">
 
-              Consignor
+              Consignor{' '}
+
+              <span className="text-xs text-slate-400 font-normal">
+                (Optional)
+              </span>
 
             </label>
+
 
             <input
               type="text"
@@ -1696,9 +2717,14 @@ export default function HarvestFestivalPage() {
 
             <label className="block text-sm font-medium text-slate-700 mb-1">
 
-              Consignor Church
+              Consignor Church{' '}
+
+              <span className="text-xs text-slate-400 font-normal">
+                (Optional)
+              </span>
 
             </label>
+
 
             <select
               value={
@@ -1743,9 +2769,14 @@ export default function HarvestFestivalPage() {
 
             <label className="block text-sm font-medium text-slate-700 mb-1">
 
-              Purchased By
+              Purchased By{' '}
+
+              <span className="text-xs text-slate-400 font-normal">
+                (Optional)
+              </span>
 
             </label>
+
 
             <input
               type="text"
@@ -1772,9 +2803,14 @@ export default function HarvestFestivalPage() {
 
             <label className="block text-sm font-medium text-slate-700 mb-1">
 
-              Purchased Person Church
+              Purchased Person Church{' '}
+
+              <span className="text-xs text-slate-400 font-normal">
+                (Optional)
+              </span>
 
             </label>
+
 
             <select
               value={
@@ -1819,9 +2855,14 @@ export default function HarvestFestivalPage() {
 
             <label className="block text-sm font-medium text-slate-700 mb-1">
 
-              Purchased Person Contact
+              Purchased Person Contact{' '}
+
+              <span className="text-xs text-slate-400 font-normal">
+                (Optional)
+              </span>
 
             </label>
+
 
             <input
               type="tel"
@@ -1848,9 +2889,14 @@ export default function HarvestFestivalPage() {
 
             <label className="block text-sm font-medium text-slate-700 mb-1">
 
-              Amount
+              Purchased Amount{' '}
+
+              <span className="text-xs text-slate-400 font-normal">
+                (Optional)
+              </span>
 
             </label>
+
 
             <div className="relative">
 
@@ -1881,30 +2927,94 @@ export default function HarvestFestivalPage() {
 
           </div>
 
+
           {/* PAYMENT METHOD */}
 
           <div>
 
             <label className="block text-sm font-medium text-slate-700 mb-1">
 
-              Payment Method
+              Payment Method{' '}
+
+              <span className="text-xs text-slate-400 font-normal">
+                (Optional)
+              </span>
 
             </label>
 
+
             <select
-              value={form.payment_method}
+              value={
+                form.payment_method
+              }
               onChange={e =>
                 setForm(f => ({
                   ...f,
-                  payment_method: e.target.value,
+                  payment_method:
+                    e.target.value,
                 }))
               }
               className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-slate-800 bg-white focus:ring-2 focus:ring-teal-500 focus:border-transparent outline-none"
-              required
             >
-              <option value="Cash">Cash</option>
-              <option value="GPay">GPay</option>
+
+              <option value="">
+                Select Payment Method
+              </option>
+
+              <option value="Cash">
+                Cash
+              </option>
+
+              <option value="GPay">
+                GPay
+              </option>
+
+              <option value="Token">
+                Token
+              </option>
+
+              <option value="Cash,Token">
+                Cash, Token
+              </option>
+
+              <option value="GPay,Token">
+                GPay, Token
+              </option>
+
+              <option value="GPay,Cash">
+                GPay, Cash
+              </option>
+
             </select>
+
+          </div>
+
+          {/* REMARKS */}
+
+          <div>
+
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+
+              Remarks{' '}
+
+              <span className="text-xs text-slate-400 font-normal">
+                (Optional)
+              </span>
+
+            </label>
+
+            <input
+              type="text"
+              value={form.remarks}
+              onChange={e =>
+                setForm(f => ({
+                  ...f,
+                  remarks: e.target.value,
+                }))
+              }
+              placeholder="Remarks"
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-slate-800 focus:ring-2 focus:ring-teal-500 focus:border-transparent outline-none"
+            />
 
           </div>
 
@@ -1917,6 +3027,7 @@ export default function HarvestFestivalPage() {
             type="submit"
             disabled={
               saving ||
+              duplicateItemNumber ||
               (isSuperAdmin && !selectedChurchId)
             }
             className="flex items-center gap-2 px-4 py-2.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-lg text-sm font-semibold transition-colors"
@@ -1952,13 +3063,29 @@ export default function HarvestFestivalPage() {
 
       {items.length > 0 && (
 
-        <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+
+          <div className="bg-blue-50 rounded-xl border border-blue-200 p-4">
+
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 opacity-70">
+              Grand Total Actual Price
+            </p>
+
+            <p className="text-xl font-bold text-blue-700 mt-1">
+              ₹
+              {totalActualPrice.toLocaleString(
+                'en-IN'
+              )}
+            </p>
+
+          </div>
+
 
           <div className="bg-amber-50 rounded-xl border border-amber-200 p-4">
 
             <p className="text-xs font-semibold uppercase tracking-wide text-amber-600 opacity-70">
 
-              Total Amount
+              Total Purchased Amount
 
             </p>
 
@@ -2028,6 +3155,7 @@ export default function HarvestFestivalPage() {
 
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
 
+
             <input
               type="text"
               value={searchQuery}
@@ -2036,7 +3164,7 @@ export default function HarvestFestivalPage() {
                   e.target.value
                 )
               }
-              placeholder="Search by item, church, consignor, purchaser or contact..."
+              placeholder="Search by item number, item, church, consignor, purchaser, contact, payment method or remarks..."
               className="w-full pl-10 pr-9 py-2.5 border border-slate-300 rounded-lg text-sm text-slate-800 bg-white focus:ring-2 focus:ring-teal-500 focus:border-transparent outline-none"
             />
 
@@ -2044,6 +3172,7 @@ export default function HarvestFestivalPage() {
             {searchQuery && (
 
               <button
+                type="button"
                 onClick={() =>
                   setSearchQuery('')
                 }
@@ -2092,11 +3221,6 @@ export default function HarvestFestivalPage() {
 
 
       ) : (
-
-        /* ==================================================
-           TABLE
-           ================================================== */
-
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
 
           <div className="overflow-x-auto">
@@ -2108,7 +3232,15 @@ export default function HarvestFestivalPage() {
                 <tr className="bg-slate-50 border-b border-slate-200">
 
                   <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Item
+                    Item Number
+                  </th>
+
+                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Item Name
+                  </th>
+
+                  <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Actual Price
                   </th>
 
                   <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -2132,7 +3264,7 @@ export default function HarvestFestivalPage() {
                   </th>
 
                   <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Amount
+                    PURCHASED AMOUNT
                   </th>
 
                   <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -2151,6 +3283,10 @@ export default function HarvestFestivalPage() {
                     Pending
                   </th>
 
+                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Remarks
+                  </th>
+
                   <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                     Actions
                   </th>
@@ -2162,15 +3298,15 @@ export default function HarvestFestivalPage() {
 
               <tbody className="divide-y divide-slate-100">
 
-                {filteredItems.map(
+                {sortedFilteredItems.map(
                   (item: any) => {
 
                     const pending =
                       Number(
-                        item.amount
+                        item.amount || 0
                       ) -
                       Number(
-                        item.settled_amount
+                        item.settled_amount || 0
                       );
 
 
@@ -2184,6 +3320,28 @@ export default function HarvestFestivalPage() {
                       item.id;
 
 
+                    const itemNameIsDuplicate =
+                      items.some(
+                        (other: any) =>
+                          other.id !== item.id &&
+                          normalizeItemName(
+                            String(
+                              other.item_name || ''
+                            )
+                          ) !== '' &&
+                          normalizeItemName(
+                            String(
+                              other.item_name || ''
+                            )
+                          ) ===
+                            normalizeItemName(
+                              String(
+                                item.item_name || ''
+                              )
+                            )
+                      );
+
+
                     return (
 
                       <tr
@@ -2192,35 +3350,134 @@ export default function HarvestFestivalPage() {
                       >
 
 
-                        {/* ITEM */}
+                        {/* ITEM NUMBER */}
 
                         <td className="px-4 py-3">
 
                           {isEditingDetails ? (
 
-                            <input
-                              type="text"
-                              value={
-                                editItemName
-                              }
-                              onChange={e =>
-                                setEditItemName(
-                                  e.target.value
-                                )
-                              }
-                              className="w-32 px-2 py-1 border border-teal-400 rounded text-sm text-slate-800 focus:ring-1 focus:ring-teal-500 outline-none"
-                            />
+                            <div>
+
+                              <select
+                                value={editItemNumber}
+                                onChange={e =>
+                                  setEditItemNumber(
+                                    e.target.value
+                                  )
+                                }
+                                className={`w-28 px-2 py-1 border rounded text-sm text-slate-800 bg-white focus:ring-1 focus:ring-teal-500 outline-none ${
+                                  hasDuplicateEditItemNumber
+                                    ? 'border-red-400 bg-red-50'
+                                    : 'border-teal-400'
+                                }`}
+                              >
+
+                                <option value="">
+                                  Select
+                                </option>
+
+                                {availableEditItemNumbers.map(
+                                  number => (
+                                    <option
+                                      key={number}
+                                      value={number}
+                                    >
+                                      {number}
+                                    </option>
+                                  )
+                                )}
+
+                              </select>
+
+                              {hasDuplicateEditItemNumber && (
+
+                                <p className="text-[10px] text-red-600 mt-1">
+
+                                  Already exists
+
+                                </p>
+
+                              )}
+
+                            </div>
+
+                          ) : (
+
+                            <span className="text-sm font-semibold text-slate-800">
+
+                              {item.item_number ||
+                                '—'}
+
+                            </span>
+
+                          )}
+
+                        </td>
+
+
+                        {/* ITEM NAME */}
+
+                        <td className="px-4 py-3">
+
+                          {isEditingDetails ? (
+
+                            <div>
+
+                              <input
+                                type="text"
+                                value={
+                                  editItemName
+                                }
+                                onChange={e =>
+                                  setEditItemName(
+                                    e.target.value
+                                  )
+                                }
+                                className={`w-32 px-2 py-1 border rounded text-sm text-slate-800 focus:ring-1 focus:ring-teal-500 outline-none ${
+                                  hasDuplicateEditItemName
+                                    ? 'border-amber-400 bg-amber-50'
+                                    : 'border-teal-400'
+                                }`}
+                              />
+
+
+                              {hasDuplicateEditItemName && (
+
+                                <p className="text-[10px] text-amber-600 mt-1">
+
+                                  Duplicate name
+
+                                </p>
+
+                              )}
+
+                            </div>
 
                           ) : (
 
                             <>
 
-                              <p className="text-sm font-medium text-slate-800">
+                              <p className={`text-sm font-medium ${
+                                itemNameIsDuplicate
+                                  ? 'text-amber-700'
+                                  : 'text-slate-800'
+                              }`}>
 
                                 {item.item_name ||
                                   '—'}
 
                               </p>
+
+
+                              {itemNameIsDuplicate && (
+
+                                <p className="text-[10px] text-amber-600 mt-0.5">
+
+                                  Duplicate name
+
+                                </p>
+
+                              )}
 
 
                               {isSuperAdmin &&
@@ -2238,6 +3495,60 @@ export default function HarvestFestivalPage() {
                                 )}
 
                             </>
+
+                          )}
+
+                        </td>
+
+
+                        {/* ACTUAL PRICE */}
+
+                        <td className="px-4 py-3 text-right">
+
+                          {isEditingDetails ? (
+
+                            <div className="relative">
+
+                              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">
+
+                                ₹
+
+                              </span>
+
+
+                              <input
+                                type="number"
+                                value={
+                                  editActualPrice
+                                }
+                                onChange={e =>
+                                  setEditActualPrice(
+                                    e.target.value
+                                  )
+                                }
+                                min="0"
+                                step="0.01"
+                                placeholder="0"
+                                className="w-24 pl-5 pr-2 py-1 border border-teal-400 rounded text-sm text-slate-800 focus:ring-1 focus:ring-teal-500 outline-none"
+                              />
+
+                            </div>
+
+                          ) : (
+
+                            <span className="text-sm text-slate-800">
+
+                              {item.actual_price !== null &&
+                              item.actual_price !== undefined &&
+                              item.actual_price !== ''
+                                ? `₹${Number(
+                                    item.actual_price
+                                  ).toLocaleString(
+                                    'en-IN'
+                                  )}`
+                                : '—'}
+
+                            </span>
 
                           )}
 
@@ -2473,7 +3784,9 @@ export default function HarvestFestivalPage() {
                             <div className="relative">
 
                               <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">
+
                                 ₹
+
                               </span>
 
 
@@ -2489,6 +3802,7 @@ export default function HarvestFestivalPage() {
                                 }
                                 min="0"
                                 step="0.01"
+                                placeholder="0"
                                 className="w-24 pl-5 pr-2 py-1 border border-teal-400 rounded text-sm text-slate-800 focus:ring-1 focus:ring-teal-500 outline-none"
                               />
 
@@ -2498,12 +3812,15 @@ export default function HarvestFestivalPage() {
 
                             <span className="text-sm text-slate-800 font-medium">
 
-                              ₹
-                              {Number(
-                                item.amount
-                              ).toLocaleString(
-                                'en-IN'
-                              )}
+                              {item.amount !== null &&
+                              item.amount !== undefined &&
+                              item.amount !== ''
+                                ? `₹${Number(
+                                    item.amount
+                                  ).toLocaleString(
+                                    'en-IN'
+                                  )}`
+                                : '—'}
 
                             </span>
 
@@ -2519,22 +3836,56 @@ export default function HarvestFestivalPage() {
                           {isEditingDetails ? (
 
                             <select
-                              value={editPaymentMethod}
+                              value={
+                                editPaymentMethod
+                              }
                               onChange={e =>
                                 setEditPaymentMethod(
-                                  e.target.value as 'Cash' | 'GPay'
+                                  e.target.value as
+                                    | 'Cash'
+                                    | 'GPay'
+                                    | 'Token'
+                                    | 'Cash,Token'
+                                    | 'GPay,Token'
+                                    | 'GPay,Cash'
                                 )
                               }
-                              className="w-24 px-2 py-1 border border-teal-400 rounded text-sm text-slate-800 bg-white focus:ring-1 focus:ring-teal-500 outline-none"
+                              className="w-36 px-2 py-1 border border-teal-400 rounded text-sm text-slate-800 bg-white focus:ring-1 focus:ring-teal-500 outline-none"
                             >
-                              <option value="Cash">Cash</option>
-                              <option value="GPay">GPay</option>
+
+                              <option value="Cash">
+                                Cash
+                              </option>
+
+                              <option value="GPay">
+                                GPay
+                              </option>
+
+                              <option value="Token">
+                                Token
+                              </option>
+
+                              <option value="Cash,Token">
+                                Cash, Token
+                              </option>
+
+                              <option value="GPay,Token">
+                                GPay, Token
+                              </option>
+
+                              <option value="GPay,Cash">
+                                GPay, Cash
+                              </option>
+
                             </select>
 
                           ) : (
 
                             <span className="text-sm text-slate-700">
-                              {item.payment_method || 'Cash'}
+
+                              {item.payment_method ||
+                                '—'}
+
                             </span>
 
                           )}
@@ -2546,42 +3897,55 @@ export default function HarvestFestivalPage() {
 
                         <td className="px-4 py-3 text-center">
 
-                          <button
-                            onClick={() =>
-                              handleStatusChange(
-                                item.id,
+                          {item.amount !== null &&
+                          item.amount !== undefined &&
+                          item.amount !== '' ? (
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleStatusChange(
+                                  item.id,
+                                  item.status ===
+                                    'paid'
+                                    ? 'due'
+                                    : 'paid'
+                                )
+                              }
+                              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${
                                 item.status ===
-                                  'paid'
-                                  ? 'due'
-                                  : 'paid'
-                              )
-                            }
-                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${
-                              item.status ===
+                                'paid'
+                                  ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                  : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                              }`}
+                            >
+
+                              {item.status ===
+                              'paid' ? (
+
+                                <CheckCircle className="w-3 h-3" />
+
+                              ) : (
+
+                                <Clock className="w-3 h-3" />
+
+                              )}
+
+
+                              {item.status ===
                               'paid'
-                                ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                                : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-                            }`}
-                          >
+                                ? 'Paid'
+                                : 'Due'}
 
-                            {item.status ===
-                            'paid' ? (
+                            </button>
 
-                              <CheckCircle className="w-3 h-3" />
+                          ) : (
 
-                            ) : (
+                            <span className="text-xs text-slate-400">
+                              —
+                            </span>
 
-                              <Clock className="w-3 h-3" />
-
-                            )}
-
-
-                            {item.status ===
-                            'paid'
-                              ? 'Paid'
-                              : 'Due'}
-
-                          </button>
+                          )}
 
                         </td>
 
@@ -2600,16 +3964,24 @@ export default function HarvestFestivalPage() {
                                   ₹
                                 </span>
 
+
                                 <input
                                   type="number"
-                                  value={editSettled}
+                                  value={
+                                    editSettled
+                                  }
                                   onChange={e =>
                                     setEditSettled(
                                       e.target.value
                                     )
                                   }
                                   min="0"
-                                  max={Number(item.amount) || 0}
+                                  max={
+                                    Number(
+                                      item.amount ||
+                                      0
+                                    )
+                                  }
                                   step="0.01"
                                   className="w-24 px-2 py-1 border border-teal-400 rounded text-sm text-slate-800 focus:ring-1 focus:ring-teal-500 outline-none"
                                   autoFocus
@@ -2627,6 +3999,7 @@ export default function HarvestFestivalPage() {
                                       );
 
                                     }
+
 
                                     if (
                                       e.key ===
@@ -2646,6 +4019,7 @@ export default function HarvestFestivalPage() {
                                   }}
                                 />
 
+
                                 <button
                                   type="button"
                                   onClick={() =>
@@ -2661,11 +4035,19 @@ export default function HarvestFestivalPage() {
 
                                 </button>
 
+
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    setEditingId(null);
-                                    setEditSettled('');
+
+                                    setEditingId(
+                                      null
+                                    );
+
+                                    setEditSettled(
+                                      ''
+                                    );
+
                                   }}
                                   className="p-1 rounded hover:bg-slate-100 text-slate-400 transition-colors"
                                   title="Cancel settled amount edit"
@@ -2677,13 +4059,17 @@ export default function HarvestFestivalPage() {
 
                               </div>
 
+
                               <span className="text-[10px] text-slate-400">
+
                                 Max: ₹
                                 {Number(
-                                  item.amount
+                                  item.amount ||
+                                  0
                                 ).toLocaleString(
                                   'en-IN'
                                 )}
+
                               </span>
 
                             </div>
@@ -2694,31 +4080,41 @@ export default function HarvestFestivalPage() {
 
                               <span className="text-sm text-green-700 font-medium">
 
-                                ₹
-                                {Number(
-                                  item.settled_amount
-                                ).toLocaleString(
-                                  'en-IN'
-                                )}
+                                {item.settled_amount !== null &&
+                                item.settled_amount !== undefined &&
+                                item.settled_amount !== ''
+                                  ? `₹${Number(
+                                      item.settled_amount
+                                    ).toLocaleString(
+                                      'en-IN'
+                                    )}`
+                                  : '—'}
 
                               </span>
 
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  startEditSettled(
-                                    item
-                                  )
-                                }
-                                className="inline-flex items-center gap-1 text-xs font-medium text-teal-600 hover:text-teal-800 hover:underline transition-colors"
-                                title="Edit settled amount"
-                              >
 
-                                <Edit3 className="w-3 h-3" />
+                              {item.amount !== null &&
+                              item.amount !== undefined &&
+                              item.amount !== '' && (
 
-                                Edit Settled
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    startEditSettled(
+                                      item
+                                    )
+                                  }
+                                  className="inline-flex items-center gap-1 text-xs font-medium text-teal-600 hover:text-teal-800 hover:underline transition-colors"
+                                  title="Edit settled amount"
+                                >
 
-                              </button>
+                                  <Edit3 className="w-3 h-3" />
+
+                                  Edit Settled
+
+                                </button>
+
+                              )}
 
                             </div>
 
@@ -2731,20 +4127,58 @@ export default function HarvestFestivalPage() {
 
                         <td className="px-4 py-3 text-right">
 
-                          <span
-                            className={`text-sm font-medium ${
-                              pending > 0
-                                ? 'text-red-600'
-                                : 'text-green-600'
-                            }`}
-                          >
+                          {item.amount !== null &&
+                          item.amount !== undefined &&
+                          item.amount !== '' ? (
 
-                            ₹
-                            {pending.toLocaleString(
-                              'en-IN'
-                            )}
+                            <span
+                              className={`text-sm font-medium ${
+                                pending > 0
+                                  ? 'text-red-600'
+                                  : 'text-green-600'
+                              }`}
+                            >
 
-                          </span>
+                              ₹
+                              {pending.toLocaleString(
+                                'en-IN'
+                              )}
+
+                            </span>
+
+                          ) : (
+
+                            <span className="text-sm text-slate-400">
+                              —
+                            </span>
+
+                          )}
+
+                        </td>
+
+
+                        {/* REMARKS */}
+
+                        <td className="px-4 py-3">
+
+                          {isEditingDetails ? (
+
+                            <input
+                              type="text"
+                              value={editRemarks}
+                              onChange={e =>
+                                setEditRemarks(e.target.value)
+                              }
+                              className="w-36 px-2 py-1 border border-teal-400 rounded text-sm text-slate-800 focus:ring-1 focus:ring-teal-500 outline-none"
+                            />
+
+                          ) : (
+
+                            <span className="text-sm text-slate-700">
+                              {item.remarks || '—'}
+                            </span>
+
+                          )}
 
                         </td>
 
@@ -2760,12 +4194,17 @@ export default function HarvestFestivalPage() {
                               <>
 
                                 <button
+                                  type="button"
                                   onClick={() =>
                                     saveEditDetails(
                                       item
                                     )
                                   }
-                                  className="p-1.5 rounded-lg hover:bg-green-50 text-green-600 transition-colors"
+                                  disabled={
+                                    hasDuplicateEditItemNumber ||
+                                    !editItemNumber.trim()
+                                  }
+                                  className="p-1.5 rounded-lg hover:bg-green-50 text-green-600 disabled:opacity-40 transition-colors"
                                   title="Save changes"
                                 >
 
@@ -2775,6 +4214,7 @@ export default function HarvestFestivalPage() {
 
 
                                 <button
+                                  type="button"
                                   onClick={
                                     cancelEditDetails
                                   }
@@ -2793,6 +4233,7 @@ export default function HarvestFestivalPage() {
                               <>
 
                                 <button
+                                  type="button"
                                   onClick={() =>
                                     startEditDetails(
                                       item
@@ -2808,6 +4249,7 @@ export default function HarvestFestivalPage() {
 
 
                                 <button
+                                  type="button"
                                   onClick={() =>
                                     handleDelete(
                                       item.id
@@ -2839,76 +4281,13 @@ export default function HarvestFestivalPage() {
               </tbody>
 
 
-              {/* TOTAL */}
 
-              <tfoot>
-
-                <tr className="bg-slate-50 border-t border-slate-200">
-
-                  <td
-                    colSpan={6}
-                    className="px-4 py-3 text-sm font-bold text-slate-800"
-                  >
-
-                    Total
-
-                  </td>
-
-
-                  <td className="px-4 py-3 text-sm font-bold text-slate-800 text-right">
-
-                    ₹
-                    {totalAmount.toLocaleString(
-                      'en-IN'
-                    )}
-
-                  </td>
-
-
-                  <td></td>
-
-
-                  <td className="px-4 py-3 text-sm font-bold text-green-700 text-right">
-
-                    ₹
-                    {totalSettled.toLocaleString(
-                      'en-IN'
-                    )}
-
-                  </td>
-
-
-                  <td className="px-4 py-3 text-sm font-bold text-right">
-
-                    <span
-                      className={
-                        totalPending > 0
-                          ? 'text-red-600'
-                          : 'text-green-600'
-                      }
-                    >
-
-                      ₹
-                      {totalPending.toLocaleString(
-                        'en-IN'
-                      )}
-
-                    </span>
-
-                  </td>
-
-
-                  <td></td>
-
-                </tr>
-
-              </tfoot>
 
             </table>
 
           </div>
 
-        </div>
+          </div>
 
       )}
 

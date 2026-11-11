@@ -3,6 +3,7 @@ import { Menu, Search, Bell, LogOut, ChevronDown, User, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
 import { NavState } from '../../types';
+import { toggleSidebarCollapsed } from '../../utils/sidebarState';
 
 interface TopBarProps {
   onMenuToggle: () => void;
@@ -87,11 +88,22 @@ export default function TopBar({ onMenuToggle, searchQuery, onSearchChange, navS
 
   const showSearch = navState.page === 'members';
 
+  // Desktop: slide the sidebar away / back. Mobile: open the drawer as before.
+  function handleMenuClick() {
+    if (window.matchMedia('(min-width: 1024px)').matches) {
+      toggleSidebarCollapsed();
+    } else {
+      onMenuToggle();
+    }
+  }
+
   return (
     <header className="bg-white border-b border-slate-200 px-4 py-3 flex items-center gap-4 sticky top-0 z-10 shadow-sm">
       <button
-        onClick={onMenuToggle}
-        className="lg:hidden p-2 rounded-lg hover:bg-slate-100 text-slate-600"
+        onClick={handleMenuClick}
+        className="p-2 rounded-lg hover:bg-slate-100 text-slate-600"
+        aria-label="Toggle menu"
+        title="Show / hide menu"
       >
         <Menu className="w-5 h-5" />
       </button>

@@ -23,14 +23,15 @@ export interface Member {
   id: string;
   church_id: string;
   family_number: string;
+  title?: string | null;
   member_name: string;
+  gender?: string | null;
   address: string;
   email: string;
   mobile: string;
   date_of_birth: string | null;
   wedding_date: string | null;
-  created_at: string;
-  church?: Church;
+  confirmation_status?: string | null;
 }
 
 export interface Subscription {

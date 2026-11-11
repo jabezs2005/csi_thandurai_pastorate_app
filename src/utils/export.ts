@@ -1,15 +1,10 @@
 import { Member } from '../types';
 
 export function exportToCSV(filename: string, data: any[], columns: { key: string; label: string }[]) {
-  const headers = columns.map(c => c.label).join(',');
-  const rows = data.map(row =>
-    columns.map(col => {
-      const value = row[col.key];
-      const str = String(value ?? '');
-      return str.includes(',') ? `"${str}"` : str;
-    }).join(',')
-  );
-  const csv = [headers, ...rows].join('\n');
+  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const headers = columns.map(c => esc(c.label)).join(',');
+  const rows = data.map(row => columns.map(col => esc(row[col.key])).join(','));
+  const csv = '\uFEFF' + [headers, ...rows].join('\n');
 
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const link = document.createElement('a');
@@ -25,15 +20,15 @@ export function exportToCSV(filename: string, data: any[], columns: { key: strin
 
 export function exportMembersToExcel(members: Member[], churchName: string) {
   try {
-    // For basic Excel export, we'll use CSV format which Excel can read
     const columns = [
-      { key: 'family_number', label: 'Family Number' },
+      { key: 'family_number', label: 'Sandha No' },
+      { key: 'title', label: 'Title' },
       { key: 'member_name', label: 'Member Name' },
+      { key: 'gender', label: 'Gender' },
       { key: 'address', label: 'Address' },
       { key: 'email', label: 'Email' },
       { key: 'mobile', label: 'Mobile' },
     ];
-
     exportToCSV(`members-${churchName}-${new Date().toISOString().split('T')[0]}`, members, columns);
   } catch (err) {
     console.error('Export failed:', err);
@@ -42,14 +37,7 @@ export function exportMembersToExcel(members: Member[], churchName: string) {
 }
 
 export function generatePDF(title: string, content: string, filename: string) {
-  const element = document.createElement('div');
-  element.innerHTML = content;
-  element.style.padding = '20px';
-  element.style.fontFamily = 'Arial, sans-serif';
-  element.style.fontSize = '12px';
-  element.style.lineHeight = '1.6';
-
-  const printWindow = window.open('', '', 'width=800,height=600');
+  const printWindow = window.open('', '', 'width=1000,height=700');
   if (printWindow) {
     printWindow.document.write(`
       <!DOCTYPE html>
@@ -57,10 +45,11 @@ export function generatePDF(title: string, content: string, filename: string) {
       <head>
         <title>${filename}</title>
         <style>
-          body { font-family: Arial, sans-serif; padding: 20px; }
+          @page { size: landscape; margin: 12mm; }
+          body { font-family: Arial, sans-serif; padding: 20px; font-size: 11px; }
           h1 { color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px; }
           table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+          th, td { border: 1px solid #ddd; padding: 6px; text-align: left; }
           th { background-color: #007bff; color: white; }
           tr:nth-child(even) { background-color: #f9f9f9; }
           .footer { margin-top: 30px; font-size: 10px; color: #666; }
@@ -69,9 +58,7 @@ export function generatePDF(title: string, content: string, filename: string) {
       <body>
         <h1>${title}</h1>
         ${content}
-        <div class="footer">
-          <p>Generated on ${new Date().toLocaleString('en-IN')}</p>
-        </div>
+        <div class="footer"><p>Generated on ${new Date().toLocaleString('en-IN')}</p></div>
       </body>
       </html>
     `);

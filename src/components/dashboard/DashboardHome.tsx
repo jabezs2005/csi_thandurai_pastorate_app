@@ -1,15 +1,19 @@
 import { useState, useEffect } from 'react';
-import { Users, Church, TrendingUp, DollarSign, ArrowRight, Calendar, Cake, Heart } from 'lucide-react';
+import { Users, Church, TrendingUp, DollarSign, ArrowRight, Calendar, Cake, Heart, BadgeCheck } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { NavState } from '../../types';
+import { countFamilies } from '../../utils/familyUtils';
 
 interface Stats {
   totalMembers: number;
   totalFamilies: number;
+  confirmedMembers: number;
+  notConfirmedMembers: number;
+  notSetMembers: number;
   totalChurches: number;
   totalContributions: number;
-  churchBreakdown: { name: string; members: number; location: string }[];
+  churchBreakdown: { name: string; members: number; families: number; confirmed: number; location: string }[];
 }
 
 interface BirthdayEvent {
@@ -30,14 +34,63 @@ interface WeddingEvent {
   mobile: string;
 }
 
+interface MemberRow {
+  id: string;
+  church_id: string;
+  family_number: string;
+  confirmation_status: string | null;
+}
+
+type SubRow = Record<string, number | null | undefined>;
+
 interface DashboardHomeProps {
   onNavigate: (state: NavState) => void;
 }
 
+const SUB_FIELDS =
+  'kattida_nidhi, sandha, aalaya_paraamarippu, narseidhi_thiruppani, yezhaiyar_nidhi, pengal_thiruppani, aangal_thiruppani, ilainyar_thiruppani, siruvar_thiruppani, girama_nidhi, kalvi_nidhi';
+
+const AMOUNT_KEYS = SUB_FIELDS.split(',').map(s => s.trim());
+
+const MEMBER_FIELDS = 'id, church_id, family_number, confirmation_status';
+
+function sumContributions(subs: SubRow[]): number {
+  return subs.reduce(
+    (total, s) => total + AMOUNT_KEYS.reduce((sum, key) => sum + (Number(s[key]) || 0), 0),
+    0
+  );
+}
+
+function confirmationCounts(members: MemberRow[]) {
+  const confirmed = members.filter(m => m.confirmation_status === 'Confirmed').length;
+  const notConfirmed = members.filter(m => m.confirmation_status === 'Not confirmed').length;
+  return { confirmed, notConfirmed, notSet: members.length - confirmed - notConfirmed };
+}
+
+// Supabase returns at most 1,000 rows per request, so read everything in pages
+async function fetchAll<T>(
+  build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>
+): Promise<T[]> {
+  const pageSize = 1000;
+  const all: T[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await build(from, from + pageSize - 1);
+    if (error || !data) break;
+    all.push(...data);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
+// Compares month and day from the "YYYY-MM-DD" text, so time zones can't shift the date
 function isToday(dateStr: string): boolean {
-  const d = new Date(dateStr);
+  const m = (dateStr || '').match(/^\d{4}-(\d{2})-(\d{2})/);
+  if (!m) return false;
   const now = new Date();
-  return d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  return Number(m[1]) === now.getMonth() + 1 && Number(m[2]) === now.getDate();
 }
 
 export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
@@ -46,6 +99,9 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const [stats, setStats] = useState<Stats>({
     totalMembers: 0,
     totalFamilies: 0,
+    confirmedMembers: 0,
+    notConfirmedMembers: 0,
+    notSetMembers: 0,
     totalChurches: 0,
     totalContributions: 0,
     churchBreakdown: [],
@@ -60,60 +116,82 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
       setLoading(true);
       try {
         if (isSuperAdmin) {
-          const [churchRes, memberRes, subRes] = await Promise.all([
+          const [churchRes, members, subs] = await Promise.all([
             supabase.from('churches').select('id, name, location'),
-            supabase.from('members').select('id, church_id, family_number, church:churches(name)'),
-            supabase.from('subscriptions').select('kattida_nidhi, sandha, aalaya_paraamarippu, narseidhi_thiruppani, yezhaiyar_nidhi, pengal_thiruppani, aangal_thiruppani, ilainyar_thiruppani, siruvar_thiruppani, girama_nidhi, kalvi_nidhi').eq('year', currentYear),
+            fetchAll<MemberRow>((from, to) =>
+              supabase.from('members').select(MEMBER_FIELDS).order('id').range(from, to)
+            ),
+            fetchAll<SubRow>((from, to) =>
+              supabase.from('subscriptions').select(SUB_FIELDS).eq('year', currentYear).order('id').range(from, to)
+            ),
           ]);
 
-          const members = memberRes.data || [];
           const churches = churchRes.data || [];
-          const subs = subRes.data || [];
+          const counts = confirmationCounts(members);
 
-          const totalContributions = subs.reduce((sum, s) => sum + (
-            (s.kattida_nidhi || 0) + (s.sandha || 0) + (s.aalaya_paraamarippu || 0) +
-            (s.narseidhi_thiruppani || 0) + (s.yezhaiyar_nidhi || 0) + (s.pengal_thiruppani || 0) +
-            (s.aangal_thiruppani || 0) + (s.ilainyar_thiruppani || 0) + (s.siruvar_thiruppani || 0) +
-            (s.girama_nidhi || 0) + (s.kalvi_nidhi || 0)
-          ), 0);
-
-          const breakdown = churches.map(c => ({
-            name: c.name,
-            location: c.location || '',
-            members: members.filter(m => m.church_id === c.id).length,
-          }));
-
-          const families = new Set(members.map(m => `${m.church_id}_${m.family_number}`));
+          const breakdown = churches.map(c => {
+            const churchMembers = members.filter(m => m.church_id === c.id);
+            return {
+              name: c.name,
+              location: c.location || '',
+              members: churchMembers.length,
+              families: countFamilies(churchMembers),
+              confirmed: confirmationCounts(churchMembers).confirmed,
+            };
+          });
 
           setStats({
             totalMembers: members.length,
-            totalFamilies: families.size,
+            totalFamilies: countFamilies(members), // 1, 1A, 1B = one family per church
+            confirmedMembers: counts.confirmed,
+            notConfirmedMembers: counts.notConfirmed,
+            notSetMembers: counts.notSet,
             totalChurches: churches.length,
-            totalContributions,
+            totalContributions: sumContributions(subs),
             churchBreakdown: breakdown,
           });
         } else if (profile?.church_id) {
-          const [memberRes, subRes] = await Promise.all([
-            supabase.from('members').select('id, family_number').eq('church_id', profile.church_id),
-            supabase.from('subscriptions').select('kattida_nidhi, sandha, aalaya_paraamarippu, narseidhi_thiruppani, yezhaiyar_nidhi, pengal_thiruppani, aangal_thiruppani, ilainyar_thiruppani, siruvar_thiruppani, girama_nidhi, kalvi_nidhi').eq('church_id', profile.church_id).eq('year', currentYear),
+          const churchId = profile.church_id;
+          const [members, subs] = await Promise.all([
+            fetchAll<MemberRow>((from, to) =>
+              supabase
+                .from('members')
+                .select(MEMBER_FIELDS)
+                .eq('church_id', churchId)
+                .order('id')
+                .range(from, to)
+            ),
+            fetchAll<SubRow>((from, to) =>
+              supabase
+                .from('subscriptions')
+                .select(SUB_FIELDS)
+                .eq('church_id', churchId)
+                .eq('year', currentYear)
+                .order('id')
+                .range(from, to)
+            ),
           ]);
 
-          const members = memberRes.data || [];
-          const subs = subRes.data || [];
-          const families = new Set(members.map(m => m.family_number));
-          const totalContributions = subs.reduce((sum, s) => sum + (
-            (s.kattida_nidhi || 0) + (s.sandha || 0) + (s.aalaya_paraamarippu || 0) +
-            (s.narseidhi_thiruppani || 0) + (s.yezhaiyar_nidhi || 0) + (s.pengal_thiruppani || 0) +
-            (s.aangal_thiruppani || 0) + (s.ilainyar_thiruppani || 0) + (s.siruvar_thiruppani || 0) +
-            (s.girama_nidhi || 0) + (s.kalvi_nidhi || 0)
-          ), 0);
+          const families = countFamilies(members);
+          const counts = confirmationCounts(members);
 
           setStats({
             totalMembers: members.length,
-            totalFamilies: families.size,
+            totalFamilies: families,
+            confirmedMembers: counts.confirmed,
+            notConfirmedMembers: counts.notConfirmed,
+            notSetMembers: counts.notSet,
             totalChurches: 1,
-            totalContributions,
-            churchBreakdown: church ? [{ name: church.name, location: church.location || '', members: members.length }] : [],
+            totalContributions: sumContributions(subs),
+            churchBreakdown: church
+              ? [{
+                  name: church.name,
+                  location: church.location || '',
+                  members: members.length,
+                  families,
+                  confirmed: counts.confirmed,
+                }]
+              : [],
           });
         }
       } finally {
@@ -126,7 +204,6 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   // Fetch today's birthdays and wedding anniversaries
   useEffect(() => {
     async function fetchEvents() {
-      // Fetch members with date_of_birth
       let query = supabase
         .from('members')
         .select('id, member_name, date_of_birth, wedding_date, family_number, mobile, church:churches(name)')
@@ -139,7 +216,6 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
       const { data: dobData } = await query;
       const allMembers = (dobData || []) as any[];
 
-      // Filter to birthdays that fall on today's date (month + day match)
       const todayBdays = allMembers
         .filter(m => m.date_of_birth && isToday(m.date_of_birth))
         .map(m => ({
@@ -153,7 +229,6 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
 
       setBirthdays(todayBdays);
 
-      // Fetch members with wedding_date (separate query to catch those without dob)
       let wQuery = supabase
         .from('members')
         .select('id, member_name, wedding_date, family_number, mobile, church:churches(name)')
@@ -183,10 +258,19 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   }, [isSuperAdmin, profile?.church_id]);
 
   const statCards = [
-    { label: 'Total Members', value: stats.totalMembers, icon: Users, color: 'teal', bg: 'bg-teal-50', icon_bg: 'bg-teal-500', text: 'text-teal-700' },
-    { label: 'Families', value: stats.totalFamilies, icon: Church, color: 'blue', bg: 'bg-blue-50', icon_bg: 'bg-blue-500', text: 'text-blue-700' },
-    { label: isSuperAdmin ? 'Churches' : 'This Church', value: isSuperAdmin ? stats.totalChurches : 1, icon: TrendingUp, color: 'amber', bg: 'bg-amber-50', icon_bg: 'bg-amber-500', text: 'text-amber-700' },
-    { label: `${currentYear} Contributions`, value: `₹${stats.totalContributions.toLocaleString('en-IN')}`, icon: DollarSign, color: 'green', bg: 'bg-green-50', icon_bg: 'bg-green-500', text: 'text-green-700', isAmount: true },
+    { label: 'Total Members', value: stats.totalMembers, icon: Users, bg: 'bg-teal-50', icon_bg: 'bg-teal-500', text: 'text-teal-700' },
+    {
+      label: 'Confirmed Members',
+      value: stats.confirmedMembers,
+      icon: BadgeCheck,
+      bg: 'bg-emerald-50',
+      icon_bg: 'bg-emerald-500',
+      text: 'text-emerald-700',
+      sub: `${stats.notConfirmedMembers} not confirmed · ${stats.notSetMembers} not set`,
+    },
+    { label: 'Families', value: stats.totalFamilies, icon: Church, bg: 'bg-blue-50', icon_bg: 'bg-blue-500', text: 'text-blue-700' },
+    { label: isSuperAdmin ? 'Churches' : 'This Church', value: isSuperAdmin ? stats.totalChurches : 1, icon: TrendingUp, bg: 'bg-amber-50', icon_bg: 'bg-amber-500', text: 'text-amber-700' },
+    { label: `${currentYear} Contributions`, value: `₹${stats.totalContributions.toLocaleString('en-IN')}`, icon: DollarSign, bg: 'bg-green-50', icon_bg: 'bg-green-500', text: 'text-green-700', isAmount: true },
   ];
 
   const today = new Date();
@@ -204,8 +288,8 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
       </div>
 
       {loading ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          {[...Array(4)].map((_, i) => (
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+          {[...Array(5)].map((_, i) => (
             <div key={i} className="bg-white rounded-xl border border-slate-200 p-5 animate-pulse">
               <div className="h-4 bg-slate-200 rounded w-3/4 mb-3" />
               <div className="h-8 bg-slate-200 rounded w-1/2" />
@@ -213,17 +297,18 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
           {statCards.map((card, i) => {
             const Icon = card.icon;
             return (
               <div key={i} className={`${card.bg} rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition-shadow`}>
                 <div className="flex items-start justify-between">
-                  <div>
+                  <div className="min-w-0">
                     <p className={`text-xs font-semibold uppercase tracking-wide ${card.text} opacity-70`}>{card.label}</p>
                     <p className={`text-2xl font-bold mt-1.5 ${card.text}`}>
                       {card.isAmount ? card.value : card.value.toLocaleString('en-IN')}
                     </p>
+                    {card.sub && <p className="text-xs text-slate-500 mt-1">{card.sub}</p>}
                   </div>
                   <div className={`${card.icon_bg} w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm`}>
                     <Icon className="w-5 h-5 text-white" />
@@ -287,7 +372,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           ) : (
             <div className="space-y-2">
               {weddings.map(w => {
-                const years = new Date().getFullYear() - new Date(w.wedding_date).getFullYear();
+                const years = new Date().getFullYear() - Number(w.wedding_date.slice(0, 4));
                 return (
                   <div
                     key={w.id}
@@ -334,8 +419,8 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
                     <p className="text-sm font-semibold text-slate-800 truncate">{c.name}</p>
                     <p className="text-xs text-slate-500">{c.location}</p>
                   </div>
-                  <span className="text-xs bg-teal-100 text-teal-700 px-2 py-1 rounded-full font-semibold flex-shrink-0">
-                    {c.members} members
+                  <span className="text-xs bg-teal-100 text-teal-700 px-2 py-1 rounded-full font-semibold flex-shrink-0 text-right">
+                    {c.members} members · {c.families} families · {c.confirmed} confirmed
                   </span>
                 </div>
               ))}

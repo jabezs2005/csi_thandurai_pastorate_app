@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Phone, Mail, MapPin, Home, CreditCard as Edit2, Users, Calendar, Heart } from 'lucide-react';
+import { ArrowLeft, Phone, Mail, MapPin, Home, CreditCard as Edit2, Users, Calendar, Heart, User, Cake } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { Member, NavState } from '../../types';
 import AddMemberModal from './AddMemberModal';
 import SubscriptionTable from '../subscriptions/SubscriptionTable';
 import BuildingConstructionFundTable from '../subscriptions/BuildingConstructionFundTable';
+import { parseFamilyNumber, sortMembersByFamily } from '../../utils/familyUtils';
+import { formatAge } from '../../utils/age';
 
 interface MemberDetailProps {
   memberId?: string;
@@ -21,18 +23,23 @@ export default function MemberDetail({ memberId, familyNumber, onNavigate }: Mem
   async function fetchData() {
     setLoading(true);
     if (familyNumber) {
+      // Load the whole Sandha group: 1, 1A, 1B ...
+      const base = parseFamilyNumber(familyNumber).base;
       const { data } = await supabase
         .from('members')
         .select('*, church:churches(id,name,location)')
-        .eq('family_number', familyNumber)
-        .order('member_name');
-      const list = data || [];
+        .ilike('family_number', `${base}%`);
+
+      let list = ((data || []) as Member[]).filter(m => parseFamilyNumber(m.family_number).base === base);
+
+      // Keep only one church's group (the same number can exist in other churches)
+      const target = memberId ? list.find(m => m.id === memberId) : undefined;
+      const churchId = (target || list[0])?.church_id;
+      if (churchId) list = list.filter(m => m.church_id === churchId);
+
+      list = sortMembersByFamily(list);
       setMembers(list);
-      if (memberId) {
-        setSelectedMember(list.find(m => m.id === memberId) || list[0] || null);
-      } else {
-        setSelectedMember(list[0] || null);
-      }
+      setSelectedMember((memberId && list.find(m => m.id === memberId)) || list[0] || null);
     } else if (memberId) {
       const { data } = await supabase
         .from('members')
@@ -69,6 +76,10 @@ export default function MemberDetail({ memberId, familyNumber, onNavigate }: Mem
   }
 
   const church = (selectedMember as Member & { church?: { name: string; location: string } }).church;
+  const sandhaBase = parseFamilyNumber(selectedMember.family_number).base;
+  const displayName = (m: Member) => `${m.title ? `${m.title} ` : ''}${m.member_name}`;
+  const formatDate = (d?: string | null) =>
+    d ? new Date(d).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
 
   return (
     <div>
@@ -89,8 +100,8 @@ export default function MemberDetail({ memberId, familyNumber, onNavigate }: Mem
               <Home className="w-5 h-5 text-teal-700" />
             </div>
             <div>
-              <p className="text-xs text-slate-500 uppercase font-semibold tracking-wide">Family</p>
-              <p className="text-lg font-bold text-slate-800">{selectedMember.family_number}</p>
+              <p className="text-xs text-slate-500 uppercase font-semibold tracking-wide">Sandha No</p>
+              <p className="text-lg font-bold text-slate-800">{sandhaBase}</p>
             </div>
           </div>
           <div className="space-y-2">
@@ -104,19 +115,22 @@ export default function MemberDetail({ memberId, familyNumber, onNavigate }: Mem
                     : 'hover:bg-slate-100 text-slate-700'
                 }`}
               >
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                <div className={`min-w-[2rem] h-6 px-1.5 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
                   selectedMember.id === m.id ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-600'
                 }`}>
-                  {m.member_name.charAt(0)}
+                  {m.family_number}
                 </div>
-                <span className="truncate">{m.member_name}</span>
+                <span className="truncate flex-1">{displayName(m)}</span>
+                <span className={`text-xs flex-shrink-0 ${selectedMember.id === m.id ? 'text-white/80' : 'text-slate-400'}`}>
+                  {m.date_of_birth ? formatAge(m.date_of_birth) : ''}
+                </span>
               </button>
             ))}
           </div>
           {members.length > 1 && (
             <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-500">
               <Users className="w-3 h-3" />
-              <span>{members.length} family members</span>
+              <span>{members.length} members</span>
             </div>
           )}
         </div>
@@ -128,9 +142,9 @@ export default function MemberDetail({ memberId, familyNumber, onNavigate }: Mem
                 {selectedMember.member_name.charAt(0)}
               </div>
               <div>
-                <h2 className="text-xl font-bold text-slate-800">{selectedMember.member_name}</h2>
+                <h2 className="text-xl font-bold text-slate-800">{displayName(selectedMember)}</h2>
                 {church && <p className="text-sm text-teal-600 font-medium">{church.name}</p>}
-                <p className="text-xs text-slate-400 mt-0.5">Family: {selectedMember.family_number}</p>
+                <p className="text-xs text-slate-400 mt-0.5">Sandha No: {selectedMember.family_number}</p>
               </div>
             </div>
             <button
@@ -142,12 +156,17 @@ export default function MemberDetail({ memberId, familyNumber, onNavigate }: Mem
             </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <InfoBlock icon={<User className="w-4 h-4" />} label="Gender" value={selectedMember.gender || '—'} />
+            <InfoBlock icon={<Cake className="w-4 h-4" />} label="Age" value={formatAge(selectedMember.date_of_birth)} />
+            <InfoBlock icon={<Calendar className="w-4 h-4" />} label="Date of Birth" value={formatDate(selectedMember.date_of_birth)} />
             <InfoBlock icon={<Phone className="w-4 h-4" />} label="Mobile" value={selectedMember.mobile || '—'} />
             <InfoBlock icon={<Mail className="w-4 h-4" />} label="Email" value={selectedMember.email || '—'} />
-            <InfoBlock icon={<Calendar className="w-4 h-4" />} label="Date of Birth" value={selectedMember.date_of_birth ? new Date(selectedMember.date_of_birth).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'} />
-            <InfoBlock icon={<Heart className="w-4 h-4" />} label="Wedding Date" value={selectedMember.wedding_date ? new Date(selectedMember.wedding_date).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'} />
-            <InfoBlock icon={<MapPin className="w-4 h-4" />} label="Address" value={selectedMember.address || '—'} />
+            <InfoBlock icon={<Heart className="w-4 h-4" />} label="Wedding Date" value={formatDate(selectedMember.wedding_date)} />
+            <InfoBlock icon={<User className="w-4 h-4" />} label="Confirmation" value={selectedMember.confirmation_status || 'Not set'} />
+            <div className="sm:col-span-3">
+              <InfoBlock icon={<MapPin className="w-4 h-4" />} label="Address" value={selectedMember.address || '—'} />
+            </div>
           </div>
         </div>
       </div>

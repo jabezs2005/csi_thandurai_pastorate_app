@@ -1,20 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import {
-  Save,
-  ChevronLeft,
-  ChevronRight,
-  Download,
-} from 'lucide-react';
+import { Save, ChevronLeft, ChevronRight, Download, FileText } from 'lucide-react';
 
 import { supabase } from '../../lib/supabase';
-import {
-  Subscription,
-  SUBSCRIPTION_FIELDS,
-  MONTHS,
-} from '../../types';
-
+import { Subscription, SUBSCRIPTION_FIELDS, MONTHS } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { logActivity } from '../../utils/activityLogger';
+import { memberFileName } from '../../utils/fileNames';
+import { downloadCsv, downloadPdf } from '../../utils/tableExport';
 
 /* =========================================================
    TYPES
@@ -23,6 +15,9 @@ import { logActivity } from '../../utils/activityLogger';
 interface SubscriptionTableProps {
   memberId: string;
   churchId: string;
+  memberName?: string;
+  sandhaNo?: string;
+  churchName?: string;
 }
 
 type RowData = Partial<Subscription> & {
@@ -41,15 +36,11 @@ type MonthChange = {
   month: number;
   year: number;
   monthName: string;
-
   oldTotal: number;
   newTotal: number;
-
   oldData: Record<string, number>;
   newData: Record<string, number>;
-
-  /* IMPORTANT:
-     ActivityLogsPage expects fieldChanges */
+  /* ActivityLogsPage expects fieldChanges */
   fieldChanges: FieldChange[];
 };
 
@@ -60,13 +51,13 @@ type MonthChange = {
 export default function SubscriptionTable({
   memberId,
   churchId,
+  memberName,
+  sandhaNo,
+  churchName,
 }: SubscriptionTableProps) {
   const { profile } = useAuth();
 
-  const [year, setYear] = useState(
-    new Date().getFullYear()
-  );
-
+  const [year, setYear] = useState(new Date().getFullYear());
   const [rows, setRows] = useState<RowData[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -96,11 +87,7 @@ export default function SubscriptionTable({
         girama_nidhi: 0,
         kalvi_nidhi: 0,
       })),
-    [
-      memberId,
-      churchId,
-      year,
-    ]
+    [memberId, churchId, year]
   );
 
   /* =========================================================
@@ -112,54 +99,33 @@ export default function SubscriptionTable({
       setLoading(true);
 
       try {
-        const {
-          data,
-          error,
-        } = await supabase
+        const { data, error } = await supabase
           .from('subscriptions')
           .select('*')
           .eq('member_id', memberId)
           .eq('church_id', churchId)
           .eq('year', year)
-          .order('month', {
-            ascending: true,
-          });
+          .order('month', { ascending: true });
 
         if (error) {
-          console.error(
-            'Failed to fetch subscriptions:',
-            error
-          );
-
+          console.error('Failed to fetch subscriptions:', error);
           setRows(buildEmptyRows());
           return;
         }
 
-        const base =
-          buildEmptyRows();
+        const base = buildEmptyRows();
 
         (data || []).forEach(sub => {
-          const index =
-            Number(sub.month) - 1;
+          const index = Number(sub.month) - 1;
 
-          if (
-            index >= 0 &&
-            index < 12
-          ) {
-            base[index] = {
-              ...base[index],
-              ...sub,
-            };
+          if (index >= 0 && index < 12) {
+            base[index] = { ...base[index], ...sub };
           }
         });
 
         setRows(base);
       } catch (error) {
-        console.error(
-          'Unexpected error while fetching subscriptions:',
-          error
-        );
-
+        console.error('Unexpected error while fetching subscriptions:', error);
         setRows(buildEmptyRows());
       } finally {
         setLoading(false);
@@ -167,39 +133,18 @@ export default function SubscriptionTable({
     }
 
     fetchSubscriptions();
-  }, [
-    memberId,
-    churchId,
-    year,
-    buildEmptyRows,
-  ]);
+  }, [memberId, churchId, year, buildEmptyRows]);
 
   /* =========================================================
      UPDATE CELL
   ========================================================= */
 
-  function updateCell(
-    monthIndex: number,
-    field: string,
-    value: string
-  ) {
-    const numberValue =
-      value === ''
-        ? 0
-        : Math.max(
-            0,
-            Number(value) || 0
-          );
+  function updateCell(monthIndex: number, field: string, value: string) {
+    const numberValue = value === '' ? 0 : Math.max(0, Number(value) || 0);
 
     setRows(previous =>
-      previous.map(
-        (row, index) =>
-          index === monthIndex
-            ? {
-                ...row,
-                [field]: numberValue,
-              }
-            : row
+      previous.map((row, index) =>
+        index === monthIndex ? { ...row, [field]: numberValue } : row
       )
     );
 
@@ -207,75 +152,35 @@ export default function SubscriptionTable({
   }
 
   /* =========================================================
-     ROW TOTAL
+     TOTALS
   ========================================================= */
 
-  function rowTotal(
-    row: RowData
-  ): number {
+  function rowTotal(row: RowData): number {
     return SUBSCRIPTION_FIELDS.reduce(
-      (sum, field) =>
-        sum +
-        (Number(
-          row[field.key]
-        ) || 0),
+      (sum, field) => sum + (Number(row[field.key]) || 0),
       0
     );
   }
 
-  /* =========================================================
-     COLUMN TOTAL
-  ========================================================= */
-
-  function colTotal(
-    key: string
-  ): number {
+  function colTotal(key: string): number {
     return rows.reduce(
-      (sum, row) =>
-        sum +
-        (Number(
-          row[
-            key as keyof RowData
-          ]
-        ) || 0),
+      (sum, row) => sum + (Number(row[key as keyof RowData]) || 0),
       0
     );
   }
 
-  /* =========================================================
-     GRAND TOTAL
-  ========================================================= */
-
-  const grandTotal =
-    rows.reduce(
-      (sum, row) =>
-        sum + rowTotal(row),
-      0
-    );
+  const grandTotal = rows.reduce((sum, row) => sum + rowTotal(row), 0);
 
   /* =========================================================
-     GET CLEAN CONTRIBUTION DATA
-
-     This creates the exact old/new values that will
-     be stored in the activity log.
+     CLEAN CONTRIBUTION DATA (stored in the activity log)
   ========================================================= */
 
-  function getContributionData(
-    source: any
-  ): Record<string, number> {
-    const result: Record<
-      string,
-      number
-    > = {};
+  function getContributionData(source: any): Record<string, number> {
+    const result: Record<string, number> = {};
 
-    SUBSCRIPTION_FIELDS.forEach(
-      field => {
-        result[field.key] =
-          Number(
-            source?.[field.key]
-          ) || 0;
-      }
-    );
+    SUBSCRIPTION_FIELDS.forEach(field => {
+      result[field.key] = Number(source?.[field.key]) || 0;
+    });
 
     return result;
   }
@@ -293,16 +198,8 @@ export default function SubscriptionTable({
     setSaved(false);
 
     try {
-      /* -----------------------------------------------------
-         1. FETCH CURRENT DATABASE VALUES
-
-         These are the TRUE OLD VALUES.
-      ----------------------------------------------------- */
-
-      const {
-        data: existingData,
-        error: existingError,
-      } = await supabase
+      /* 1. Current database values (the true old values) */
+      const { data: existingData, error: existingError } = await supabase
         .from('subscriptions')
         .select('*')
         .eq('member_id', memberId)
@@ -313,142 +210,68 @@ export default function SubscriptionTable({
         throw existingError;
       }
 
-      /* -----------------------------------------------------
-         2. MAP DATABASE RECORDS BY MONTH
-      ----------------------------------------------------- */
+      /* 2. Map database records by month */
+      const existingByMonth = new Map<number, any>();
 
-      const existingByMonth =
-        new Map<number, any>();
+      (existingData || []).forEach(record => {
+        existingByMonth.set(Number(record.month), record);
+      });
 
-      (existingData || []).forEach(
-        record => {
-          existingByMonth.set(
-            Number(record.month),
-            record
-          );
-        }
-      );
-
-      /* -----------------------------------------------------
-         3. PREPARE MONTH CHANGES
-      ----------------------------------------------------- */
-
-      const monthChanges: MonthChange[] =
-        [];
-
+      /* 3. Prepare month changes */
+      const monthChanges: MonthChange[] = [];
       const rowsToSave: any[] = [];
 
       let hasNewRecord = false;
       let hasUpdatedRecord = false;
 
       for (const row of rows) {
-        const monthNumber =
-          Number(row.month);
+        const monthNumber = Number(row.month);
+        const existing = existingByMonth.get(monthNumber);
 
-        const existing =
-          existingByMonth.get(
-            monthNumber
-          );
+        const oldData = getContributionData(existing);
+        const newData = getContributionData(row);
 
-        /*
-         * Exact data BEFORE save
-         */
+        const fieldChanges: FieldChange[] = [];
 
-        const oldData =
-          getContributionData(existing);
+        SUBSCRIPTION_FIELDS.forEach(field => {
+          const oldValue = oldData[field.key] || 0;
+          const newValue = newData[field.key] || 0;
 
-        /*
-         * Exact data AFTER save
-         */
-
-        const newData =
-          getContributionData(row);
-
-        /*
-         * Compare every field
-         */
-
-        const fieldChanges: FieldChange[] =
-          [];
-
-        SUBSCRIPTION_FIELDS.forEach(
-          field => {
-            const oldValue =
-              oldData[field.key] || 0;
-
-            const newValue =
-              newData[field.key] || 0;
-
-            if (
-              oldValue !== newValue
-            ) {
-              fieldChanges.push({
-                key: field.key,
-                label: field.label,
-                oldValue,
-                newValue,
-              });
-            }
+          if (oldValue !== newValue) {
+            fieldChanges.push({
+              key: field.key,
+              label: field.label,
+              oldValue,
+              newValue,
+            });
           }
-        );
+        });
 
-        /*
-         * Nothing changed in this month
-         */
-
-        if (
-          fieldChanges.length === 0
-        ) {
+        /* Nothing changed in this month */
+        if (fieldChanges.length === 0) {
           continue;
         }
 
-        /*
-         * Calculate totals
-         */
+        const oldTotal = Object.values(oldData).reduce(
+          (sum, value) => sum + Number(value || 0),
+          0
+        );
 
-        const oldTotal =
-          Object.values(
-            oldData
-          ).reduce(
-            (sum, value) =>
-              sum + Number(value || 0),
-            0
-          );
-
-        const newTotal =
-          Object.values(
-            newData
-          ).reduce(
-            (sum, value) =>
-              sum + Number(value || 0),
-            0
-          );
-
-        /*
-         * IMPORTANT:
-         * Save complete change information.
-        */
+        const newTotal = Object.values(newData).reduce(
+          (sum, value) => sum + Number(value || 0),
+          0
+        );
 
         monthChanges.push({
           month: monthNumber,
           year,
-          monthName:
-            MONTHS[
-              monthNumber - 1
-            ],
-
+          monthName: MONTHS[monthNumber - 1],
           oldTotal,
           newTotal,
-
           oldData,
           newData,
-
           fieldChanges,
         });
-
-        /*
-         * Detect CREATE or UPDATE
-         */
 
         if (existing) {
           hasUpdatedRecord = true;
@@ -456,36 +279,18 @@ export default function SubscriptionTable({
           hasNewRecord = true;
         }
 
-        /*
-         * Prepare database row
-         */
-
         rowsToSave.push({
-          id:
-            existing?.id ||
-            row.id,
-
-          member_id:
-            memberId,
-
-          church_id:
-            churchId,
-
+          id: existing?.id || row.id,
+          member_id: memberId,
+          church_id: churchId,
           year,
-          month:
-            monthNumber,
-
+          month: monthNumber,
           ...newData,
         });
       }
 
-      /* -----------------------------------------------------
-         4. NOTHING CHANGED
-      ----------------------------------------------------- */
-
-      if (
-        monthChanges.length === 0
-      ) {
+      /* 4. Nothing changed */
+      if (monthChanges.length === 0) {
         setSaved(true);
 
         setTimeout(() => {
@@ -495,106 +300,49 @@ export default function SubscriptionTable({
         return;
       }
 
-      /* -----------------------------------------------------
-         5. REMOVE EMPTY ID
+      /* 5. New rows must not contain id: undefined */
+      const cleanRows = rowsToSave.map(row => {
+        if (!row.id) {
+          const { id: _id, ...dataWithoutId } = row;
+          void _id;
+          return dataWithoutId;
+        }
 
-         New rows must not contain id: undefined.
-      ----------------------------------------------------- */
+        return row;
+      });
 
-      const cleanRows =
-        rowsToSave.map(row => {
-          if (!row.id) {
-            const {
-              id: _id,
-              ...dataWithoutId
-            } = row;
-
-            void _id;
-
-            return dataWithoutId;
-          }
-
-          return row;
-        });
-
-      /* -----------------------------------------------------
-         6. SAVE TO DATABASE
-      ----------------------------------------------------- */
-
-      const {
-        error: saveError,
-      } = await supabase
+      /* 6. Save to database */
+      const { error: saveError } = await supabase
         .from('subscriptions')
-        .upsert(
-          cleanRows,
-          {
-            onConflict:
-              'member_id,year,month',
-          }
-        );
+        .upsert(cleanRows, { onConflict: 'member_id,year,month' });
 
       if (saveError) {
         throw saveError;
       }
 
-      /* -----------------------------------------------------
-         7. FETCH MEMBER DETAILS
-      ----------------------------------------------------- */
-
-      const {
-        data: memberData,
-        error: memberError,
-      } = await supabase
+      /* 7. Member details for the log */
+      const { data: memberData, error: memberError } = await supabase
         .from('members')
-        .select(
-          'id, member_name, family_number'
-        )
+        .select('id, member_name, family_number')
         .eq('id', memberId)
         .maybeSingle();
 
       if (memberError) {
-        console.warn(
-          'Could not fetch member details:',
-          memberError
-        );
+        console.warn('Could not fetch member details:', memberError);
       }
 
-      const memberName =
-        memberData?.member_name ||
-        'Unknown Member';
+      const loggedMemberName = memberData?.member_name || 'Unknown Member';
 
-      /* -----------------------------------------------------
-         8. DETERMINE ACTIVITY ACTION
-      ----------------------------------------------------- */
+      /* 8. Activity action */
+      let activityAction = 'update';
 
-      let activityAction =
-        'update';
-
-      if (
-        hasNewRecord &&
-        !hasUpdatedRecord
-      ) {
-        activityAction =
-          'create';
+      if (hasNewRecord && !hasUpdatedRecord) {
+        activityAction = 'create';
       }
 
-      /*
-       * If one save contains both new and edited months,
-       * use update because it represents the whole save.
-       */
-
-      /* -----------------------------------------------------
-         9. CREATE ACTIVITY LOG
-
-         THIS IS THE IMPORTANT FIX.
-
-         fieldChanges, oldData and newData are now
-         permanently stored in activity_logs.
-      ----------------------------------------------------- */
-
+      /* 9. Activity log */
       if (profile?.id) {
-        const changedAt =
-          new Date().toISOString();
+        const changedAt = new Date().toISOString();
 
         await logActivity(
           profile.id,
@@ -602,96 +350,37 @@ export default function SubscriptionTable({
           activityAction,
           'subscription',
           memberId,
-          `${memberName} ${
-            activityAction === 'create'
-              ? 'created'
-              : 'edited'
+          `${loggedMemberName} ${
+            activityAction === 'create' ? 'created' : 'edited'
           } Contributions for ${year}`,
           {
-            operation:
-              activityAction.toUpperCase(),
-
-            table:
-              'subscriptions',
-
+            operation: activityAction.toUpperCase(),
+            table: 'subscriptions',
             memberId,
-
-            member_id:
-              memberId,
-
-            memberName,
-
-            member_name:
-              memberName,
-
-            familyNumber:
-              memberData?.family_number ||
-              null,
-
+            member_id: memberId,
+            memberName: loggedMemberName,
+            member_name: loggedMemberName,
+            familyNumber: memberData?.family_number || null,
             year,
 
-            /*
-             * COMPLETE MONTH-BY-MONTH HISTORY
-             */
-
+            /* Complete month-by-month history */
             monthChanges,
 
-            /*
-             * Convenience values for the Activity Logs page
-             */
+            changedMonths: monthChanges.map(item => item.monthName),
+            changedMonthNumbers: monthChanges.map(item => item.month),
+            changedFieldCount: monthChanges.reduce(
+              (total, item) => total + item.fieldChanges.length,
+              0
+            ),
 
-            changedMonths:
-              monthChanges.map(
-                item =>
-                  item.monthName
-              ),
-
-            changedMonthNumbers:
-              monthChanges.map(
-                item =>
-                  item.month
-              ),
-
-            changedFieldCount:
-              monthChanges.reduce(
-                (total, item) =>
-                  total +
-                  item.fieldChanges.length,
-                0
-              ),
-
-            /*
-             * Also store the first month values at top level.
-             * This provides compatibility with ActivityLogsPage.
-             */
-
-            month:
-              monthChanges.length === 1
-                ? monthChanges[0].month
-                : undefined,
-
-            monthName:
-              monthChanges.length === 1
-                ? monthChanges[0].monthName
-                : undefined,
-
-            oldData:
-              monthChanges.length === 1
-                ? monthChanges[0].oldData
-                : undefined,
-
-            newData:
-              monthChanges.length === 1
-                ? monthChanges[0].newData
-                : undefined,
-
-            fieldChanges:
-              monthChanges.length === 1
-                ? monthChanges[0].fieldChanges
-                : undefined,
+            /* Top-level values for ActivityLogsPage compatibility */
+            month: monthChanges.length === 1 ? monthChanges[0].month : undefined,
+            monthName: monthChanges.length === 1 ? monthChanges[0].monthName : undefined,
+            oldData: monthChanges.length === 1 ? monthChanges[0].oldData : undefined,
+            newData: monthChanges.length === 1 ? monthChanges[0].newData : undefined,
+            fieldChanges: monthChanges.length === 1 ? monthChanges[0].fieldChanges : undefined,
 
             grandTotal,
-
             changedAt,
           }
         );
@@ -701,163 +390,89 @@ export default function SubscriptionTable({
         );
       }
 
-      /* -----------------------------------------------------
-         10. REFRESH DATA
-      ----------------------------------------------------- */
-
-      const {
-        data: refreshedData,
-        error: refreshError,
-      } = await supabase
+      /* 10. Refresh data */
+      const { data: refreshedData, error: refreshError } = await supabase
         .from('subscriptions')
         .select('*')
         .eq('member_id', memberId)
         .eq('church_id', churchId)
         .eq('year', year)
-        .order('month', {
-          ascending: true,
-        });
+        .order('month', { ascending: true });
 
       if (refreshError) {
-        console.error(
-          'Failed to refresh subscriptions:',
-          refreshError
-        );
+        console.error('Failed to refresh subscriptions:', refreshError);
       }
 
-      const refreshedRows =
-        buildEmptyRows();
+      const refreshedRows = buildEmptyRows();
 
-      (refreshedData || []).forEach(
-        sub => {
-          const index =
-            Number(sub.month) - 1;
+      (refreshedData || []).forEach(sub => {
+        const index = Number(sub.month) - 1;
 
-          if (
-            index >= 0 &&
-            index < 12
-          ) {
-            refreshedRows[index] = {
-              ...refreshedRows[index],
-              ...sub,
-            };
-          }
+        if (index >= 0 && index < 12) {
+          refreshedRows[index] = { ...refreshedRows[index], ...sub };
         }
-      );
+      });
 
       setRows(refreshedRows);
 
-      /* -----------------------------------------------------
-         11. SUCCESS
-      ----------------------------------------------------- */
-
+      /* 11. Success */
       setSaved(true);
 
       setTimeout(() => {
         setSaved(false);
       }, 2000);
     } catch (error: any) {
-      console.error(
-        'Failed to save contributions:',
-        error
-      );
+      console.error('Failed to save contributions:', error);
 
-      alert(
-        `Failed to save contributions: ${
-          error?.message ||
-          'Unknown error'
-        }`
-      );
+      alert(`Failed to save contributions: ${error?.message || 'Unknown error'}`);
     } finally {
       setSaving(false);
     }
   }
 
   /* =========================================================
-     DOWNLOAD CSV
+     DOWNLOADS (Excel + PDF)
+     File name: Sandha-No-<no>_<member name>_<church name>_Contributions-<year>
   ========================================================= */
 
+  function buildExportData() {
+    const headers = ['Month', ...SUBSCRIPTION_FIELDS.map(f => f.label), 'Total'];
+
+    const body: (string | number)[][] = rows.map((row, index) => [
+      MONTHS[index],
+      ...SUBSCRIPTION_FIELDS.map(f => Number(row[f.key]) || 0),
+      rowTotal(row),
+    ]);
+
+    body.push(['TOTAL', ...SUBSCRIPTION_FIELDS.map(f => colTotal(f.key)), grandTotal]);
+
+    return { headers, body };
+  }
+
+  const exportFileName = memberFileName({
+    sandhaNo: sandhaNo || '',
+    memberName: memberName || '',
+    churchName,
+    report: `Contributions-${year}`,
+  });
+
+  const exportTitle = [
+    churchName,
+    memberName,
+    sandhaNo ? `Sandha No ${sandhaNo}` : '',
+    `Contributions ${year}`,
+  ]
+    .filter(Boolean)
+    .join(' - ');
+
   function handleDownloadExcel() {
-    const headers = [
-      'Month',
-      ...SUBSCRIPTION_FIELDS.map(
-        field => field.label
-      ),
-      'Total',
-    ];
+    const { headers, body } = buildExportData();
+    downloadCsv(exportFileName, headers, body);
+  }
 
-    const csvRows = [
-      headers.join(','),
-
-      ...rows.map(
-        (row, index) => {
-          const total =
-            rowTotal(row);
-
-          const values =
-            SUBSCRIPTION_FIELDS.map(
-              field =>
-                Number(
-                  row[field.key]
-                ) || 0
-            );
-
-          return [
-            MONTHS[index],
-            ...values,
-            total,
-          ].join(',');
-        }
-      ),
-
-      [
-        'TOTAL',
-        ...SUBSCRIPTION_FIELDS.map(
-          field =>
-            colTotal(field.key)
-        ),
-        grandTotal,
-      ].join(','),
-    ];
-
-    const csv =
-      csvRows.join('\n');
-
-    const blob =
-      new Blob(
-        [csv],
-        {
-          type:
-            'text/csv;charset=utf-8;',
-        }
-      );
-
-    const link =
-      document.createElement('a');
-
-    const url =
-      URL.createObjectURL(blob);
-
-    link.setAttribute(
-      'href',
-      url
-    );
-
-    link.setAttribute(
-      'download',
-      `contributions-${year}.csv`
-    );
-
-    link.style.visibility =
-      'hidden';
-
-    document.body.appendChild(link);
-
-    link.click();
-
-    document.body.removeChild(link);
-
-    URL.revokeObjectURL(url);
+  function handleDownloadPdf() {
+    const { headers, body } = buildExportData();
+    downloadPdf(exportFileName, exportTitle, headers, body);
   }
 
   /* =========================================================
@@ -878,45 +493,26 @@ export default function SubscriptionTable({
 
   return (
     <div className="mt-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <h3 className="text-lg font-bold text-slate-800">Subscription / Contributions</h3>
 
-      <div className="flex items-center justify-between mb-4">
-
-        <h3 className="text-lg font-bold text-slate-800">
-          Subscription / Contributions
-        </h3>
-
-        <div className="flex items-center gap-3">
-
+        <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
-
             <button
-              onClick={() =>
-                setYear(
-                  current =>
-                    current - 1
-                )
-              }
+              onClick={() => setYear(current => current - 1)}
               className="p-1 rounded hover:bg-white transition-colors"
             >
               <ChevronLeft className="w-4 h-4 text-slate-600" />
             </button>
 
-            <span className="text-sm font-bold text-slate-700 px-2">
-              {year}
-            </span>
+            <span className="text-sm font-bold text-slate-700 px-2">{year}</span>
 
             <button
-              onClick={() =>
-                setYear(
-                  current =>
-                    current + 1
-                )
-              }
+              onClick={() => setYear(current => current + 1)}
               className="p-1 rounded hover:bg-white transition-colors"
             >
               <ChevronRight className="w-4 h-4 text-slate-600" />
             </button>
-
           </div>
 
           <button
@@ -925,6 +521,14 @@ export default function SubscriptionTable({
           >
             <Download className="w-4 h-4" />
             Excel
+          </button>
+
+          <button
+            onClick={handleDownloadPdf}
+            className="flex items-center gap-2 px-3 py-2 border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-600 text-sm font-medium transition-colors"
+          >
+            <FileText className="w-4 h-4" />
+            PDF
           </button>
 
           <button
@@ -937,189 +541,109 @@ export default function SubscriptionTable({
             }`}
           >
             <Save className="w-4 h-4" />
-
-            {saving
-              ? 'Saving...'
-              : saved
-              ? 'Saved!'
-              : 'Save Changes'}
+            {saving ? 'Saving...' : saved ? 'Saved!' : 'Save Changes'}
           </button>
-
         </div>
-
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm">
-
         <table className="w-full text-xs border-collapse min-w-[1200px]">
-
           <thead>
             <tr className="bg-slate-800 text-white">
-
               <th className="px-3 py-3 text-left font-semibold sticky left-0 bg-slate-800 z-10 w-28">
                 Maatham
               </th>
 
-              {SUBSCRIPTION_FIELDS.map(
-                field => (
-                  <th
-                    key={field.key}
-                    className="px-2 py-3 text-center font-semibold whitespace-nowrap"
-                  >
-                    {field.label}
-                  </th>
-                )
-              )}
+              {SUBSCRIPTION_FIELDS.map(field => (
+                <th key={field.key} className="px-2 py-3 text-center font-semibold whitespace-nowrap">
+                  {field.label}
+                </th>
+              ))}
 
               <th className="px-3 py-3 text-right font-semibold bg-teal-700 whitespace-nowrap">
                 Total
               </th>
-
             </tr>
           </thead>
 
           <tbody>
+            {rows.map((row, index) => {
+              const total = rowTotal(row);
+              const isEven = index % 2 === 0;
 
-            {rows.map(
-              (row, index) => {
-                const total =
-                  rowTotal(row);
-
-                const isEven =
-                  index % 2 === 0;
-
-                return (
-                  <tr
-                    key={row.month}
-                    className={`${
-                      isEven
-                        ? 'bg-white'
-                        : 'bg-slate-50'
-                    } hover:bg-teal-50 transition-colors`}
+              return (
+                <tr
+                  key={row.month}
+                  className={`${isEven ? 'bg-white' : 'bg-slate-50'} hover:bg-teal-50 transition-colors`}
+                >
+                  <td
+                    className={`px-3 py-2 font-medium text-slate-700 sticky left-0 z-10 ${
+                      isEven ? 'bg-white' : 'bg-slate-50'
+                    } border-r border-slate-200`}
                   >
+                    {MONTHS[index]}
+                  </td>
 
-                    <td
-                      className={`px-3 py-2 font-medium text-slate-700 sticky left-0 z-10 ${
-                        isEven
-                          ? 'bg-white'
-                          : 'bg-slate-50'
-                      } border-r border-slate-200`}
-                    >
-                      {MONTHS[index]}
+                  {SUBSCRIPTION_FIELDS.map(field => (
+                    <td key={field.key} className="px-1 py-1.5 text-center">
+                      <input
+                        type="number"
+                        min="0"
+                        value={row[field.key] || ''}
+                        onChange={event => updateCell(index, field.key, event.target.value)}
+                        className="w-full px-1.5 py-1 text-center border border-transparent rounded focus:border-teal-400 focus:ring-1 focus:ring-teal-400 outline-none bg-transparent hover:bg-white focus:bg-white transition-colors text-slate-700"
+                        placeholder="0"
+                      />
                     </td>
+                  ))}
 
-                    {SUBSCRIPTION_FIELDS.map(
-                      field => (
-                        <td
-                          key={field.key}
-                          className="px-1 py-1.5 text-center"
-                        >
-                          <input
-                            type="number"
-                            min="0"
-                            value={
-                              row[field.key] || ''
-                            }
-                            onChange={event =>
-                              updateCell(
-                                index,
-                                field.key,
-                                event.target.value
-                              )
-                            }
-                            className="w-full px-1.5 py-1 text-center border border-transparent rounded focus:border-teal-400 focus:ring-1 focus:ring-teal-400 outline-none bg-transparent hover:bg-white focus:bg-white transition-colors text-slate-700"
-                            placeholder="0"
-                          />
-                        </td>
-                      )
-                    )}
-
-                    <td
-                      className={`px-3 py-2 text-right font-bold text-teal-700 ${
-                        total > 0
-                          ? 'bg-teal-50'
-                          : ''
-                      }`}
-                    >
-                      {total > 0
-                        ? total.toLocaleString(
-                            'en-IN'
-                          )
-                        : '—'}
-                    </td>
-
-                  </tr>
-                );
-              }
-            )}
-
+                  <td
+                    className={`px-3 py-2 text-right font-bold text-teal-700 ${
+                      total > 0 ? 'bg-teal-50' : ''
+                    }`}
+                  >
+                    {total > 0 ? total.toLocaleString('en-IN') : '—'}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
 
           <tfoot>
-
             <tr className="bg-slate-800 text-white font-bold text-xs">
-
               <td className="px-3 py-3 sticky left-0 bg-slate-800 z-10 font-bold text-yellow-300">
                 TOTAL
               </td>
 
-              {SUBSCRIPTION_FIELDS.map(
-                field => {
-                  const total =
-                    colTotal(field.key);
+              {SUBSCRIPTION_FIELDS.map(field => {
+                const total = colTotal(field.key);
 
-                  return (
-                    <td
-                      key={field.key}
-                      className="px-2 py-3 text-center text-yellow-200"
-                    >
-                      {total > 0
-                        ? total.toLocaleString(
-                            'en-IN'
-                          )
-                        : '—'}
-                    </td>
-                  );
-                }
-              )}
+                return (
+                  <td key={field.key} className="px-2 py-3 text-center text-yellow-200">
+                    {total > 0 ? total.toLocaleString('en-IN') : '—'}
+                  </td>
+                );
+              })}
 
               <td className="px-3 py-3 text-right text-yellow-300 bg-teal-900">
-                {grandTotal.toLocaleString(
-                  'en-IN'
-                )}
+                {grandTotal.toLocaleString('en-IN')}
               </td>
-
             </tr>
-
           </tfoot>
-
         </table>
-
       </div>
 
       <div className="mt-4">
-
         <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
-
           <p className="text-xs font-semibold text-teal-600 uppercase tracking-wide mb-1">
             Grand Total — All Contributions
           </p>
 
-          <p className="text-2xl font-bold text-teal-700">
-            ₹
-            {grandTotal.toLocaleString(
-              'en-IN'
-            )}
-          </p>
+          <p className="text-2xl font-bold text-teal-700">₹{grandTotal.toLocaleString('en-IN')}</p>
 
-          <p className="text-xs text-teal-600 mt-0.5">
-            For {year}
-          </p>
-
+          <p className="text-xs text-teal-600 mt-0.5">For {year}</p>
         </div>
-
       </div>
-
     </div>
   );
 }

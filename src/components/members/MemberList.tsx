@@ -8,6 +8,7 @@ import { supabase } from '../../lib/supabase';
 import { Member, Church as ChurchType, NavState } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import AddMemberModal from './AddMemberModal';
+import BuildingFundDownload from './BuildingFundDownload';
 import MemberFilterPanel, {
   DEFAULT_FILTERS, MIN_CONTRIBUTION, MemberFilters, ConfirmFilter,
   countActiveFilters, memberMatchesFilters,
@@ -590,6 +591,16 @@ export default function MemberList({ searchQuery, onNavigate, onSearchChange }: 
                 )}
               </div>
             </div>
+          )}
+
+          {/* Building Construction Fund: all members / filtered members */}
+          {members.length > 0 && (
+            <BuildingFundDownload
+              churchId={drilledChurchId || profile?.church_id || undefined}
+              churchName={churchName}
+              filteredMemberIds={sortedFiltered.map(m => m.id)}
+              filtersActive={activeFilterCount > 0 || !!searchQuery}
+            />
           )}
 
           {selectedIds.size > 0 && (

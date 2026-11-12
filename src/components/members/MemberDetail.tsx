@@ -172,7 +172,13 @@ export default function MemberDetail({ memberId, familyNumber, onNavigate }: Mem
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-        <SubscriptionTable memberId={selectedMember.id} churchId={selectedMember.church_id} />
+        <SubscriptionTable
+          memberId={selectedMember.id}
+          churchId={selectedMember.church_id}
+          memberName={selectedMember.member_name}
+          sandhaNo={selectedMember.family_number}
+          churchName={church?.name || ''}
+        />
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mt-6">
@@ -180,6 +186,8 @@ export default function MemberDetail({ memberId, familyNumber, onNavigate }: Mem
           memberId={selectedMember.id}
           churchId={selectedMember.church_id}
           memberName={selectedMember.member_name}
+          sandhaNo={selectedMember.family_number}
+          churchName={church?.name || ''}
         />
       </div>
 

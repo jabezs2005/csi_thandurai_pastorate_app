@@ -1,6 +1,7 @@
 import { Member } from '../types';
 import { getAge } from './age';
 import { generatePDF } from './export';
+import { seriesFileName } from './fileNames';
 
 interface ExportOptions {
   churchName: string;
@@ -30,7 +31,11 @@ const HEAD = [
   'Address', 'Email', 'Mobile', 'Grand Total Contribution',
 ];
 
-export function exportMembersCsv(list: Member[], { churchName, label, getTotal }: ExportOptions) {
+function nameFor(list: Member[], { churchName, label }: ExportOptions) {
+  return seriesFileName(churchName, list, label === 'all' ? 'Members' : 'Filtered-Members');
+}
+
+export function exportMembersCsv(list: Member[], options: ExportOptions) {
   try {
     const rows = list.map(m => [
       m.family_number || '',
@@ -42,17 +47,16 @@ export function exportMembersCsv(list: Member[], { churchName, label, getTotal }
       m.address || '',
       m.email || '',
       m.mobile || '',
-      getTotal(m.id).toFixed(2),
+      options.getTotal(m.id).toFixed(2),
     ]);
 
     const csv = [HEAD, ...rows].map(r => r.map(escapeCSV).join(',')).join('\n');
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    const safe = churchName.replace(/[^a-z0-9]/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
 
     link.href = url;
-    link.setAttribute('download', `${safe || 'church'}-members-${label}.csv`);
+    link.setAttribute('download', `${nameFor(list, options)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -63,7 +67,7 @@ export function exportMembersCsv(list: Member[], { churchName, label, getTotal }
   }
 }
 
-export function exportMembersPdf(list: Member[], { churchName, label, getTotal }: ExportOptions) {
+export function exportMembersPdf(list: Member[], options: ExportOptions) {
   const rows = list
     .map(
       m => `
@@ -77,7 +81,7 @@ export function exportMembersPdf(list: Member[], { churchName, label, getTotal }
           <td>${escapeHtml(m.address)}</td>
           <td>${escapeHtml(m.email)}</td>
           <td>${escapeHtml(m.mobile)}</td>
-          <td>${escapeHtml(money(getTotal(m.id)))}</td>
+          <td>${escapeHtml(money(options.getTotal(m.id)))}</td>
         </tr>`
     )
     .join('');
@@ -88,6 +92,6 @@ export function exportMembersPdf(list: Member[], { churchName, label, getTotal }
       <tbody>${rows}</tbody>
     </table>`;
 
-  const scope = label === 'all' ? 'All Members' : 'Filtered Members';
-  generatePDF(`${scope} - ${churchName}`, table, `members-${label}-${churchName}`);
+  const scope = options.label === 'all' ? 'All Members' : 'Filtered Members';
+  generatePDF(escapeHtml(`${scope} - ${options.churchName}`), table, nameFor(list, options));
 }

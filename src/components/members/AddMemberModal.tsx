@@ -69,6 +69,7 @@ export default function AddMemberModal({ member, onClose, onSave, defaultChurchI
     const cleanFamily = form.family_number.trim().toUpperCase();
     const escape = (s: string) => s.replace(/[%_\\]/g, '\\$&');
 
+    // Only the Sandha number must be unique in a church. Names can repeat.
     let famQuery = supabase
       .from('members')
       .select('id, member_name')
@@ -80,21 +81,6 @@ export default function AddMemberModal({ member, onClose, onSave, defaultChurchI
     if (famErr) { setError(famErr.message); setSaving(false); return; }
     if (famDup && famDup.length > 0) {
       setError(`Sandha number ${cleanFamily} already exists (${famDup[0].member_name}).`);
-      setSaving(false);
-      return;
-    }
-
-    let nameQuery = supabase
-      .from('members')
-      .select('id, family_number')
-      .eq('church_id', form.church_id)
-      .ilike('member_name', escape(cleanName))
-      .limit(1);
-    if (member?.id) nameQuery = nameQuery.neq('id', member.id);
-    const { data: nameDup, error: nameErr } = await nameQuery;
-    if (nameErr) { setError(nameErr.message); setSaving(false); return; }
-    if (nameDup && nameDup.length > 0) {
-      setError(`"${cleanName}" already exists (Sandha No ${nameDup[0].family_number}).`);
       setSaving(false);
       return;
     }
@@ -128,7 +114,11 @@ export default function AddMemberModal({ member, onClose, onSave, defaultChurchI
     }
 
     if (queryError) {
-      setError(queryError.code === '23505' ? 'This Sandha number or name already exists.' : queryError.message);
+      setError(
+        queryError.code === '23505'
+          ? `Sandha number ${cleanFamily} already exists in this church.`
+          : queryError.message
+      );
     } else {
       onSave();
     }

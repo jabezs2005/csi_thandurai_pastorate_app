@@ -164,6 +164,8 @@ export default function MemberDetail({ memberId, familyNumber, onNavigate }: Mem
             <InfoBlock icon={<Mail className="w-4 h-4" />} label="Email" value={selectedMember.email || '—'} />
             <InfoBlock icon={<Heart className="w-4 h-4" />} label="Wedding Date" value={formatDate(selectedMember.wedding_date)} />
             <InfoBlock icon={<User className="w-4 h-4" />} label="Confirmation" value={selectedMember.confirmation_status || 'Not set'} />
+            <InfoBlock icon={<Calendar className="w-4 h-4" />} label="Confirmation Date" value={formatDate(selectedMember.confirmation_date)} />
+<InfoBlock icon={<Calendar className="w-4 h-4" />} label="Baptism Date" value={formatDate(selectedMember.baptism_date)} />
             <div className="sm:col-span-3">
               <InfoBlock icon={<MapPin className="w-4 h-4" />} label="Address" value={selectedMember.address || '—'} />
             </div>

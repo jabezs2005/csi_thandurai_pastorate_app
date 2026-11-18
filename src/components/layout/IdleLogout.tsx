@@ -27,6 +27,9 @@ function writeLastActivity(time: number) {
 
 export default function IdleLogout() {
   const { signOut } = useAuth();
+  const signOutRef = useRef(signOut);
+  signOutRef.current = signOut;
+
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   const lastWrite = useRef(0);
   const signingOut = useRef(false);
@@ -35,7 +38,7 @@ export default function IdleLogout() {
     function logout() {
       if (signingOut.current) return;
       signingOut.current = true;
-      void signOut();
+      void signOutRef.current();
     }
 
     // Any activity (in any open tab) resets the timer
@@ -57,9 +60,11 @@ export default function IdleLogout() {
       setSecondsLeft(left <= WARNING_MS ? Math.ceil(left / 1000) : null);
     }
 
-    // On load: if the browser was closed and reopened after the limit, sign out now
-    if (!localStorage.getItem(STORAGE_KEY)) writeLastActivity(Date.now());
-    check();
+    // The page just opened after a login: always start a fresh idle period,
+    // so an old saved time can never sign the person out immediately.
+    const startedAt = Date.now();
+    lastWrite.current = startedAt;
+    writeLastActivity(startedAt);
 
     ACTIVITY_EVENTS.forEach(evt => window.addEventListener(evt, markActivity, { passive: true }));
     const interval = window.setInterval(check, 5000);
@@ -74,10 +79,8 @@ export default function IdleLogout() {
       window.clearInterval(interval);
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('focus', check);
-      // The user is signed out (or the page is leaving the app), so start fresh next time
-      try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
     };
-  }, [signOut]);
+  }, []);
 
   if (secondsLeft === null) return null;
 

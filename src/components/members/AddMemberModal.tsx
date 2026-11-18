@@ -29,6 +29,8 @@ export default function AddMemberModal({ member, onClose, onSave, defaultChurchI
     member_name: member?.member_name || '',
     gender: member?.gender || '',
     confirmation_status: member?.confirmation_status || '',
+    confirmation_date: member?.confirmation_date || '',
+    baptism_date: member?.baptism_date || '',
     address: member?.address || '',
     email: member?.email || '',
     mobile: member?.mobile || '',
@@ -62,6 +64,13 @@ export default function AddMemberModal({ member, onClose, onSave, defaultChurchI
       setError('Date of birth cannot be in the future.');
       return;
     }
+    if (
+      (form.confirmation_date && form.confirmation_date > todayStr) ||
+      (form.baptism_date && form.baptism_date > todayStr)
+    ) {
+      setError('Confirmation and baptism dates cannot be in the future.');
+      return;
+    }
 
     setSaving(true);
 
@@ -92,6 +101,8 @@ export default function AddMemberModal({ member, onClose, onSave, defaultChurchI
       member_name: cleanName,
       gender: form.gender || null,
       confirmation_status: form.confirmation_status || null,
+      confirmation_date: form.confirmation_date || null,
+      baptism_date: form.baptism_date || null,
       address: form.address.trim(),
       email: form.email.trim().toLowerCase(),
       mobile: form.mobile.trim(),
@@ -275,6 +286,29 @@ export default function AddMemberModal({ member, onClose, onSave, defaultChurchI
                 <option value="">Select</option>
                 {CONFIRMATION.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Confirmation Date</label>
+              <input
+                type="date"
+                value={form.confirmation_date}
+                max={todayStr}
+                onChange={e => handleChange('confirmation_date', e.target.value)}
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Baptism Date</label>
+              <input
+                type="date"
+                value={form.baptism_date}
+                max={todayStr}
+                onChange={e => handleChange('baptism_date', e.target.value)}
+                className={inputClass}
+              />
             </div>
           </div>
 

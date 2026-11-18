@@ -2,6 +2,7 @@ import { Member } from '../types';
 import { getAge } from './age';
 import { generatePDF } from './export';
 import { seriesFileName } from './fileNames';
+import { formatDisplayDate } from './dates';
 
 interface ExportOptions {
   churchName: string;
@@ -28,7 +29,7 @@ const money = (n: number) =>
 
 const HEAD = [
   'Sandha No', 'Title', 'Member Name', 'Gender', 'Age', 'Confirmation',
-  'Address', 'Email', 'Mobile', 'Grand Total Contribution',
+  'Confirmation Date', 'Baptism Date', 'Address', 'Email', 'Mobile', 'Grand Total Contribution',
 ];
 
 function nameFor(list: Member[], { churchName, label }: ExportOptions) {
@@ -44,6 +45,8 @@ export function exportMembersCsv(list: Member[], options: ExportOptions) {
       m.gender || '',
       getAge(m.date_of_birth) ?? '',
       m.confirmation_status || '',
+      formatDisplayDate(m.confirmation_date),
+      formatDisplayDate(m.baptism_date),
       m.address || '',
       m.email || '',
       m.mobile || '',
@@ -78,6 +81,8 @@ export function exportMembersPdf(list: Member[], options: ExportOptions) {
           <td>${escapeHtml(m.gender)}</td>
           <td>${escapeHtml(getAge(m.date_of_birth) ?? '')}</td>
           <td>${escapeHtml(m.confirmation_status)}</td>
+          <td>${escapeHtml(formatDisplayDate(m.confirmation_date))}</td>
+          <td>${escapeHtml(formatDisplayDate(m.baptism_date))}</td>
           <td>${escapeHtml(m.address)}</td>
           <td>${escapeHtml(m.email)}</td>
           <td>${escapeHtml(m.mobile)}</td>

@@ -32,6 +32,8 @@ export interface Member {
   date_of_birth: string | null;
   wedding_date: string | null;
   confirmation_status?: string | null;
+  confirmation_date?: string | null;
+  baptism_date?: string | null;
 }
 
 export interface Subscription {

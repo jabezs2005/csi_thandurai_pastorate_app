@@ -18,6 +18,10 @@ export interface MemberFilters {
   street: string;
   contrib: 'all' | 'min240';
   confirmation: ConfirmFilter;
+  confDateFrom: string;
+  confDateTo: string;
+  bapDateFrom: string;
+  bapDateTo: string;
 }
 
 export const DEFAULT_FILTERS: MemberFilters = {
@@ -30,6 +34,10 @@ export const DEFAULT_FILTERS: MemberFilters = {
   street: '',
   contrib: 'all',
   confirmation: 'all',
+  confDateFrom: '',
+  confDateTo: '',
+  bapDateFrom: '',
+  bapDateTo: '',
 };
 
 export function countActiveFilters(f: MemberFilters): number {
@@ -40,7 +48,9 @@ export function countActiveFilters(f: MemberFilters): number {
     (f.gender !== 'all' ? 1 : 0) +
     (f.street.trim() !== '' ? 1 : 0) +
     (f.contrib !== 'all' ? 1 : 0) +
-    (f.confirmation !== 'all' ? 1 : 0)
+    (f.confirmation !== 'all' ? 1 : 0) +
+    (f.confDateFrom !== '' || f.confDateTo !== '' ? 1 : 0) +
+    (f.bapDateFrom !== '' || f.bapDateTo !== '' ? 1 : 0)
   );
 }
 
@@ -53,6 +63,21 @@ export function memberMatchesFilters(member: Member, f: MemberFilters, grandTota
     } else if (member.confirmation_status !== f.confirmation) {
       return false;
     }
+  }
+
+  // Dates are "YYYY-MM-DD" text, so they compare correctly as strings
+  if (f.confDateFrom || f.confDateTo) {
+    const d = member.confirmation_date;
+    if (!d) return false;
+    if (f.confDateFrom && d < f.confDateFrom) return false;
+    if (f.confDateTo && d > f.confDateTo) return false;
+  }
+
+  if (f.bapDateFrom || f.bapDateTo) {
+    const d = member.baptism_date;
+    if (!d) return false;
+    if (f.bapDateFrom && d < f.bapDateFrom) return false;
+    if (f.bapDateTo && d > f.bapDateTo) return false;
   }
 
   if (f.alpha && !member.member_name.trim().toUpperCase().startsWith(f.alpha)) return false;
@@ -217,6 +242,42 @@ export default function MemberFilterPanel({ filters, onChange, streetSuggestions
             <option value="all">All contributions</option>
             <option value="min240">Grand total ₹{MIN_CONTRIBUTION} and above</option>
           </select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className={labelClass}>Confirmation date</label>
+          <div className="flex items-center gap-2">
+            <input
+              type="date" value={filters.confDateFrom}
+              onChange={e => set('confDateFrom', e.target.value)}
+              className={inputClass} aria-label="Confirmation date from"
+            />
+            <span className="text-slate-400 text-sm">to</span>
+            <input
+              type="date" value={filters.confDateTo}
+              onChange={e => set('confDateTo', e.target.value)}
+              className={inputClass} aria-label="Confirmation date to"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className={labelClass}>Baptism date</label>
+          <div className="flex items-center gap-2">
+            <input
+              type="date" value={filters.bapDateFrom}
+              onChange={e => set('bapDateFrom', e.target.value)}
+              className={inputClass} aria-label="Baptism date from"
+            />
+            <span className="text-slate-400 text-sm">to</span>
+            <input
+              type="date" value={filters.bapDateTo}
+              onChange={e => set('bapDateTo', e.target.value)}
+              className={inputClass} aria-label="Baptism date to"
+            />
+          </div>
         </div>
       </div>
     </div>
